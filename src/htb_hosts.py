@@ -18,6 +18,7 @@ import fcntl
 import ipaddress
 import os
 import re
+import sys
 from typing import Any, Callable, Optional
 
 HOSTS_FILE: str = os.environ.get("HTB_HOSTS_FILE", "/etc/hosts")
@@ -187,10 +188,15 @@ def _today() -> str:
 
 
 def _read() -> str:
-    """Return the full contents of HOSTS_FILE, or '' if it does not exist."""
+    """Return the full contents of HOSTS_FILE, or '' if it does not exist.
+
+    Takes a shared flock so reads never observe a write in progress (writers
+    hold an exclusive lock in _locked_write and edit in place).
+    """
     if not os.path.exists(HOSTS_FILE):
         return ""
     with open(HOSTS_FILE, encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
         return handle.read()
 
 
@@ -245,20 +251,26 @@ def _compose(pre: list[str], entries: list[Entry], post: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
+def _write_snapshot(path: str, text: str) -> None:
+    """Write a snapshot file readable only by its owner (it may name lab targets)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
 def _backup(text: str) -> None:
     """Write a timestamped backup and prune to the last BACKUP_KEEP; best-effort."""
     try:
-        os.makedirs(BACKUP_DIR, exist_ok=True)
+        os.makedirs(BACKUP_DIR, mode=0o700, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        path = os.path.join(BACKUP_DIR, f"{BACKUP_PREFIX}{stamp}")
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write(text)
+        _write_snapshot(os.path.join(BACKUP_DIR, f"{BACKUP_PREFIX}{stamp}"), text)
         backups = sorted(b for b in os.listdir(BACKUP_DIR) if b.startswith(BACKUP_PREFIX))
         for old in backups[:-BACKUP_KEEP]:
             os.remove(os.path.join(BACKUP_DIR, old))
-    except OSError:
-        # Backups are best-effort; never block the actual edit on them.
-        pass
+    except OSError as exc:
+        # Never block the edit on a failed snapshot, but never fail silently
+        # either: a quiet miss removes the safety net exactly when it matters.
+        print(f"warning: automatic backup failed ({exc}); continuing without it", file=sys.stderr)
 
 
 def _permission_hint() -> str:
@@ -544,14 +556,39 @@ def retag() -> Dict:
     return {"retagged": _transaction(mutate)}
 
 
+def _marker_problem(text: str) -> Optional[str]:
+    """Describe a malformed managed block (orphaned/duplicate markers), or None.
+
+    A truncated or hand-mangled block makes _split treat its entries as
+    unmanaged, so the next write would append a second block. Surface that in
+    `doctor` instead of letting it bite silently.
+    """
+    markers = [
+        "BEGIN" if line.startswith(BEGIN) else "END"
+        for line in text.splitlines()
+        if line.startswith((BEGIN, END))
+    ]
+    if markers in ([], ["BEGIN", "END"]):
+        return None
+    return (
+        f"malformed managed block (marker sequence: {' '.join(markers)}); "
+        "fix the markers by hand or roll back with `htb-hosts restore`"
+    )
+
+
 def doctor() -> Dict:
     """Report writability/ACL status and, if broken, the exact setfacl fix."""
     info: Dict = {"hosts_file": HOSTS_FILE, "exists": os.path.exists(HOSTS_FILE)}
     info["writable"] = os.access(HOSTS_FILE, os.W_OK) if info["exists"] else None
-    _, entries, _ = _split(_read())
+    text = _read()
+    _, entries, _ = _split(text)
     info["managed_entries"] = len(entries)
-    info["ok"] = bool(info["exists"] and info["writable"])
-    if not info["ok"]:
+    problem = _marker_problem(text)
+    info["block_ok"] = problem is None
+    if problem:
+        info["block_problem"] = problem
+    info["ok"] = bool(info["exists"] and info["writable"] and info["block_ok"])
+    if not (info["exists"] and info["writable"]):
         info["fix"] = _permission_hint()
     return info
 
@@ -588,13 +625,12 @@ def backup(label: Optional[str] = None) -> Dict:
     An optional `label` is appended to the filename for easy identification.
     """
     text = _read()
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    os.makedirs(BACKUP_DIR, mode=0o700, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     suffix = f".{validate_tag(label)}" if label else ""
     name = f"{SAVE_PREFIX}{stamp}{suffix}"
     path = os.path.join(BACKUP_DIR, name)
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(text)
+    _write_snapshot(path, text)
     return {"name": name, "path": path, "bytes": len(text)}
 
 

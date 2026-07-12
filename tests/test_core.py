@@ -1,5 +1,7 @@
 """Tests for the core library (htb_hosts.py)."""
 
+import contextlib
+import io
 import os
 import threading
 import unittest
@@ -367,6 +369,61 @@ class TestBackupRestore(HostsTestCase):
     def test_restore_without_backups_errors(self):
         with self.assertRaises(self.core.HostsError):
             self.core.restore()
+
+
+class TestBackupHardening(HostsTestCase):
+    def test_backup_dir_and_files_are_private(self):
+        """Snapshots may name lab targets: dir must be 0700, files 0600."""
+        self.core.add("10.0.0.1", ["a.htb"])  # auto snapshot
+        self.core.backup(label="perm-check")  # explicit snapshot
+        self.assertEqual(os.stat(self.core.BACKUP_DIR).st_mode & 0o777, 0o700)
+        for name in os.listdir(self.core.BACKUP_DIR):
+            path = os.path.join(self.core.BACKUP_DIR, name)
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+    def test_failed_auto_backup_warns_but_does_not_block(self):
+        """A snapshot failure must not stop the edit, and must not be silent."""
+        blocker = os.path.join(self.tmp, "blocker")
+        with open(blocker, "w", encoding="utf-8"):
+            pass
+        self.core.BACKUP_DIR = os.path.join(blocker, "nope")  # makedirs will fail
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.core.add("10.0.0.1", ["a.htb"])
+        self.assertIn("backup failed", stderr.getvalue())
+        self.assertIn("a.htb", self.read())  # the edit itself still landed
+
+    def test_explicit_backup_failure_raises(self):
+        """Unlike auto snapshots, an explicit `backup` must fail loudly."""
+        blocker = os.path.join(self.tmp, "blocker")
+        with open(blocker, "w", encoding="utf-8"):
+            pass
+        self.core.BACKUP_DIR = os.path.join(blocker, "nope")
+        with self.assertRaises(OSError):
+            self.core.backup(label="x")
+
+
+class TestDoctorMarkers(HostsTestCase):
+    def test_doctor_ok_with_intact_block(self):
+        self.core.add("10.0.0.1", ["a.htb"])
+        info = self.core.doctor()
+        self.assertTrue(info["block_ok"])
+        self.assertTrue(info["ok"])
+
+    def test_doctor_flags_orphaned_begin(self):
+        with open(self.hosts, "a", encoding="utf-8") as handle:
+            handle.write(f"{self.core.BEGIN_LINE}\n10.0.0.1\ta.htb\n")  # no END
+        info = self.core.doctor()
+        self.assertFalse(info["block_ok"])
+        self.assertFalse(info["ok"])
+        self.assertIn("marker", info["block_problem"])
+
+    def test_doctor_flags_duplicate_blocks(self):
+        self.core.add("10.0.0.1", ["a.htb"])
+        with open(self.hosts, "a", encoding="utf-8") as handle:
+            handle.write(f"{self.core.BEGIN_LINE}\n{self.core.END}\n")
+        info = self.core.doctor()
+        self.assertFalse(info["block_ok"])
 
 
 if __name__ == "__main__":

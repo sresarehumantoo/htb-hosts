@@ -40,10 +40,11 @@ install: install-files install-acl mcp ## Install everything (files + ACL + MCP)
 	@echo "==> installed. Try: htb-hosts doctor"
 
 install-files: ## Copy the library and CLI into place (needs sudo)
-	$(SUDO) mkdir -p $(LIBDIR)
+	$(SUDO) install -d -m 0755 $(LIBDIR)
 	$(SUDO) install -m 0644 src/htb_hosts.py  $(LIBDIR)/htb_hosts.py
 	$(SUDO) install -m 0755 src/mcp_server.py $(LIBDIR)/mcp_server.py
 	$(SUDO) install -m 0755 src/htb-hosts     $(CLI)
+	$(SUDO) chmod -R go-w $(LIBDIR)  # incl. any __pycache__ from earlier runs
 
 install-acl: ## Grant $(HOSTS_USER) sudo-free write on $(HOSTS_FILE) via ACL
 	$(SUDO) setfacl -m u:$(HOSTS_USER):rw $(HOSTS_FILE)
@@ -89,9 +90,9 @@ TEST_LINT_SKIP := missing-docstring,too-few-public-methods,duplicate-code,protec
 
 lint: ## Run black --check and pylint on src (strict 10.0) and tests (relaxed)
 	black --check src/htb_hosts.py src/mcp_server.py src/htb-hosts tests/*.py
-	@cp src/htb-hosts /tmp/_htb_hosts_cli.py && \
-		pylint src/htb_hosts.py src/mcp_server.py /tmp/_htb_hosts_cli.py; \
-		rc=$$?; rm -f /tmp/_htb_hosts_cli.py; [ $$rc -eq 0 ] || exit $$rc
+	@tmpdir=$$(mktemp -d) && cp src/htb-hosts $$tmpdir/_htb_hosts_cli.py && \
+		pylint src/htb_hosts.py src/mcp_server.py $$tmpdir/_htb_hosts_cli.py; \
+		rc=$$?; rm -rf $$tmpdir; [ $$rc -eq 0 ] || exit $$rc
 	pylint --disable=$(TEST_LINT_SKIP) tests/*.py
 
 format: ## Auto-format the sources and tests with black

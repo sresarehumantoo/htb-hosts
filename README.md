@@ -44,9 +44,10 @@ cleaned 3 entry/entries (all except ~forest)
 - 🏷️ **Automatic per-box tagging** — hostnames are grouped by box name
   (`dc01.forest.htb` → `forest`), even across multiple IPs.
 - 🧰 **Safe by construction** — strict input validation (no injection), `flock`
-  locking, in-place writes that preserve the ACL, and automatic backups on every
-  change.
-- ⏪ **Backup & restore** — named snapshots and one-command rollback.
+  locking for writers *and* readers, in-place writes that preserve the ACL, and
+  automatic backups on every change (loud warning if a snapshot ever fails).
+- ⏪ **Backup & restore** — named snapshots (private: `0700`/`0600`) and
+  one-command rollback.
 - 🤖 **MCP server included** — first-class tools for Claude Code / MCP agents.
 - 🪶 **Zero runtime dependencies** — pure Python standard library.
 
@@ -111,7 +112,7 @@ works too. Add `--json` to most commands for machine-readable output.
 | `backup [--label L]` | Save an explicit snapshot |
 | `restore [--list] [name]` | Roll back to a snapshot |
 | `migrate` | Import existing `/etc/hosts` entries into the block |
-| `doctor` | Report access status and the exact fix |
+| `doctor` | Check access + managed-block integrity; print the exact fix |
 
 ### Tagging
 
@@ -188,7 +189,20 @@ Because a non-owner can't re-apply an ACL, the tool edits `/etc/hosts` **in plac
 it, which would drop the ACL and flip ownership. All input is strictly validated so
 nothing can inject extra lines, and the prior contents are snapshotted before every
 change. If the ACL is ever lost, `htb-hosts doctor` prints the exact command to
-restore it.
+restore it (`doctor` also flags a mangled managed block, e.g. an orphaned marker).
+
+### Security notes
+
+- **The ACL is broader than the tool.** `setfacl -m u:you:rw /etc/hosts` lets
+  *any* process running as your user rewrite the whole file and redirect name
+  resolution system-wide — the managed block is a convention the tool honors,
+  not something the kernel enforces. That's the deliberate trade-off for
+  sudo-free use; make it on a personal lab machine, not a shared or production
+  one. `make purge` removes the ACL again.
+- **Backups outlive `clean`.** Snapshots under `~/.local/state/htb-hosts` keep
+  old box/engagement hostnames after you wipe the block. The directory is
+  created `0700` (snapshots `0600`); delete snapshots by hand if that history
+  matters.
 
 ## Configuration
 
@@ -211,8 +225,10 @@ Tests load the modules directly from `src/`, so they exercise the in-repo copy
 regardless of what's installed under `/opt`, and each test runs against a throwaway
 temp file — your real `/etc/hosts` is never touched. Coverage includes input
 validation/injection rejection, add/merge/rehome/idempotency, clean/exclude,
-migration + tagging, backup/restore, the in-place-edit (inode-preserving) invariant
-that protects the ACL, `flock` concurrency, and the full CLI + MCP surfaces.
+migration + tagging, backup/restore (including snapshot permissions and the
+warn-but-don't-block behavior on backup failure), `doctor`'s marker-integrity
+check, the in-place-edit (inode-preserving) invariant that protects the ACL,
+`flock` concurrency, and the full CLI + MCP surfaces.
 
 ### Layout
 
