@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""htb-hosts - manage HTB host entries in /etc/hosts without sudo.
+
+All entries live in a delimited managed block; `clean` wipes them. See the
+core library at /opt/htb-hosts/htb_hosts.py.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import json
+import sys
+from typing import Optional, Sequence
+
+sys.path.insert(0, "/opt/htb-hosts")
+import htb_hosts as hh  # noqa: E402  pylint: disable=wrong-import-position
+
+
+def _print_entry(entry: hh.Dict) -> None:
+    """Print one managed entry in the human-readable list format."""
+    hosts = " ".join(entry["hostnames"])
+    tag = f"  [tag={entry['tag']}]" if entry.get("tag") else ""
+    print(f"  {entry['ip']:<15} {hosts}{tag}")
+
+
+def _cmd_add(args: argparse.Namespace) -> int:
+    ip, hostnames = hh.split_ip_and_hosts(args.args)
+    res = hh.add(ip, hostnames, args.tag)
+    if args.json:
+        print(json.dumps(res))
+    else:
+        entry = res["entry"]
+        print(f"added: {entry['ip']} {' '.join(entry['hostnames'])} [tag={entry['tag']}]")
+        for warning in res["warnings"]:
+            print(f"warning: {warning}", file=sys.stderr)
+    return 0
+
+
+def _cmd_rm(args: argparse.Namespace) -> int:
+    res = hh.remove(args.selector)
+    if args.json:
+        print(json.dumps(res))
+    else:
+        print(f"removed {len(res['removed'])} match(es) for {args.selector!r}")
+    return 0
+
+
+def _cmd_clean(args: argparse.Namespace) -> int:
+    res = hh.clean(args.tag, args.exclude)
+    if args.json:
+        print(json.dumps(res))
+    else:
+        if args.exclude:
+            scope = f"all except ~{', '.join(args.exclude)}"
+        elif args.tag:
+            scope = f"tag={args.tag}"
+        else:
+            scope = "all managed entries"
+        print(f"cleaned {len(res['removed'])} entry/entries ({scope})")
+    return 0
+
+
+def _cmd_list(args: argparse.Namespace) -> int:
+    entries = hh.list_entries(args.tag)
+    if args.json:
+        print(json.dumps(entries))
+    elif not entries:
+        print("(no managed entries)")
+    else:
+        print(f"managed entries ({len(entries)}):")
+        for entry in entries:
+            _print_entry(entry)
+    return 0
+
+
+def _cmd_show(args: argparse.Namespace) -> int:
+    full = args.full or args.scope in ("full", "all")
+    data = hh.show_data(full)
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+    boxes = "box" if data["box_count"] == 1 else "boxes"
+    entries = "entry" if data["managed_count"] == 1 else "entries"
+    print(f"HTB hosts — {data['managed_count']} managed {entries} in {data['box_count']} {boxes}")
+    for tag in sorted(data["groups"]):
+        group = data["groups"][tag]
+        print(f"\n  {tag} ({len(group)})")
+        for entry in sorted(group, key=lambda e: e["ip"]):
+            print(f"    {entry['ip']:<15} {' '.join(entry['hostnames'])}")
+    if full:
+        unmanaged = data["unmanaged"]
+        print(f"\n  unmanaged / system ({len(unmanaged)}) — outside the managed block")
+        for entry in unmanaged:
+            print(f"    {entry['ip']:<15} {' '.join(entry['hostnames'])}")
+    return 0
+
+
+def _cmd_migrate(_args: argparse.Namespace) -> int:
+    res = hh.migrate()
+    print(f"imported {len(res['imported'])} entry/entries into the managed block")
+    return 0
+
+
+def _cmd_retag(args: argparse.Namespace) -> int:
+    res = hh.retag()
+    if args.json:
+        print(json.dumps(res))
+    else:
+        print(f"retagged {len(res['retagged'])} entry/entries by box name")
+        for change in res["retagged"]:
+            print(f"  {change['ip']:<15} {change['old']} -> {change['new']}")
+    return 0
+
+
+def _cmd_backup(args: argparse.Namespace) -> int:
+    res = hh.backup(args.label)
+    if args.json:
+        print(json.dumps(res))
+    else:
+        print(f"saved backup: {res['name']} ({res['bytes']} bytes)")
+    return 0
+
+
+def _cmd_restore(args: argparse.Namespace) -> int:
+    if args.list:
+        backups = hh.list_backups()
+        if args.json:
+            print(json.dumps(backups))
+        elif not backups:
+            print("(no backups)")
+        else:
+            print(f"backups ({len(backups)}), newest last:")
+            for entry in backups:
+                when = datetime.datetime.fromtimestamp(entry["mtime"]).strftime("%Y-%m-%d %H:%M:%S")
+                print(f"  {entry['kind']:<4} {when}  {entry['bytes']:>6}B  {entry['name']}")
+        return 0
+    res = hh.restore(args.name)
+    if args.json:
+        print(json.dumps(res))
+    else:
+        print(f"restored from {res['restored_from']} ({res['bytes']} bytes)")
+    return 0
+
+
+def _cmd_doctor(_args: argparse.Namespace) -> int:
+    info = hh.doctor()
+    print(json.dumps(info, indent=2))
+    return 0 if info["ok"] else 1
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """Construct the argument parser with all subcommands."""
+    parser = argparse.ArgumentParser(
+        prog="htb-hosts",
+        description="Add/remove HTB hosts in /etc/hosts (no sudo needed).",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_add = sub.add_parser("add", help="add/update a host entry")
+    p_add.add_argument(
+        "args",
+        nargs="+",
+        metavar="IP/HOSTNAME",
+        help="the IP and one or more hostnames, in any order",
+    )
+    p_add.add_argument("--tag", help="group tag (defaults to the box name)")
+    p_add.add_argument("--json", action="store_true")
+    p_add.set_defaults(func=_cmd_add)
+
+    p_rm = sub.add_parser("rm", help="remove a host by hostname or IP")
+    p_rm.add_argument("selector")
+    p_rm.add_argument("--json", action="store_true")
+    p_rm.set_defaults(func=_cmd_rm)
+
+    p_clean = sub.add_parser("clean", help="remove managed entries (all, or by --tag/--exclude)")
+    p_clean.add_argument("--tag", help="only remove entries with this exact tag")
+    p_clean.add_argument(
+        "--exclude",
+        action="append",
+        metavar="PATTERN",
+        help="remove everything EXCEPT fuzzy matches (repeatable), e.g. --exclude forest",
+    )
+    p_clean.add_argument("--json", action="store_true")
+    p_clean.set_defaults(func=_cmd_clean)
+
+    p_list = sub.add_parser("list", help="list managed entries")
+    p_list.add_argument("--tag")
+    p_list.add_argument("--json", action="store_true")
+    p_list.set_defaults(func=_cmd_list)
+
+    p_show = sub.add_parser("show", help="pretty, box-grouped overview of managed hosts")
+    p_show.add_argument(
+        "scope",
+        nargs="?",
+        choices=["full", "all"],
+        help="'full' (or 'all') also lists unmanaged/system entries",
+    )
+    p_show.add_argument("--full", action="store_true", help="same as the 'full' scope")
+    p_show.add_argument("--json", action="store_true")
+    p_show.set_defaults(func=_cmd_show)
+
+    p_migrate = sub.add_parser("migrate", help="one-time import of existing entries into the block")
+    p_migrate.set_defaults(func=_cmd_migrate)
+
+    p_retag = sub.add_parser("retag", help="recompute all tags from box name (fixes tag=imported)")
+    p_retag.add_argument("--json", action="store_true")
+    p_retag.set_defaults(func=_cmd_retag)
+
+    p_backup = sub.add_parser("backup", help="save an explicit snapshot of /etc/hosts")
+    p_backup.add_argument("--label", help="label appended to the backup filename")
+    p_backup.add_argument("--json", action="store_true")
+    p_backup.set_defaults(func=_cmd_backup)
+
+    p_restore = sub.add_parser("restore", help="restore /etc/hosts from a snapshot")
+    p_restore.add_argument("name", nargs="?", help="backup name/substring (default: most recent)")
+    p_restore.add_argument("--list", action="store_true", help="list available backups")
+    p_restore.add_argument("--json", action="store_true")
+    p_restore.set_defaults(func=_cmd_restore)
+
+    p_doctor = sub.add_parser("doctor", help="check writability / show the setfacl fix")
+    p_doctor.set_defaults(func=_cmd_doctor)
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """CLI entry point. Returns a process exit code."""
+    args = _build_parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except hh.HostsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

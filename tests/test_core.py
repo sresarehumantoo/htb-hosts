@@ -1,0 +1,373 @@
+"""Tests for the core library (htb_hosts.py)."""
+
+import os
+import threading
+import unittest
+
+from base import HostsTestCase
+
+
+class TestValidation(HostsTestCase):
+    def test_validate_ip_ok(self):
+        self.assertEqual(self.core.validate_ip(" 10.129.45.2 "), "10.129.45.2")
+        self.assertEqual(self.core.validate_ip("::1"), "::1")
+
+    def test_validate_ip_bad(self):
+        for bad in ("999.1.1.1", "10.0.0", "nope", ""):
+            with self.assertRaises(self.core.HostsError):
+                self.core.validate_ip(bad)
+
+    def test_validate_hostname_ok(self):
+        for good in ("machine.htb", "a.b.c.htb", "host_1.vl", "x"):
+            self.assertEqual(self.core.validate_hostname(good), good)
+
+    def test_validate_hostname_bad(self):
+        for bad in ("a b.htb", "a\nb", "a#b", "", "-lead.htb", "x" * 254):
+            with self.assertRaises(self.core.HostsError):
+                self.core.validate_hostname(bad)
+
+    def test_validate_tag(self):
+        self.assertEqual(self.core.validate_tag("box-1_2.x"), "box-1_2.x")
+        with self.assertRaises(self.core.HostsError):
+            self.core.validate_tag("bad tag")
+
+    def test_default_tag(self):
+        self.assertEqual(self.core.default_tag("app.blurry.htb"), "blurry")
+        self.assertEqual(self.core.default_tag("sequel.htb"), "sequel")
+        self.assertEqual(self.core.default_tag("solo"), "solo")
+
+
+class TestSplit(HostsTestCase):
+    def test_ip_any_position(self):
+        for tokens in (
+            ["10.129.45.2", "a.htb", "b.htb"],
+            ["a.htb", "b.htb", "10.129.45.2"],
+            ["a.htb", "10.129.45.2", "b.htb"],
+        ):
+            ip, hosts = self.core.split_ip_and_hosts(tokens)
+            self.assertEqual(ip, "10.129.45.2")
+            self.assertEqual(hosts, ["a.htb", "b.htb"])
+
+    def test_no_ip(self):
+        with self.assertRaises(self.core.HostsError):
+            self.core.split_ip_and_hosts(["a.htb", "b.htb"])
+
+    def test_two_ips(self):
+        with self.assertRaises(self.core.HostsError):
+            self.core.split_ip_and_hosts(["10.0.0.1", "a.htb", "10.0.0.2"])
+
+
+class TestAdd(HostsTestCase):
+    def test_add_creates_entry(self):
+        res = self.core.add("10.129.45.2", ["machine.htb", "www.machine.htb"])
+        self.assertEqual(res["entry"]["ip"], "10.129.45.2")
+        self.assertEqual(res["entry"]["tag"], "machine")
+        self.assertEqual(len(self.block_lines()), 1)
+        self.assertIn("machine.htb", self.read())
+
+    def test_add_explicit_tag_and_date(self):
+        res = self.core.add("10.0.0.1", ["a.htb"], tag="box")
+        self.assertEqual(res["entry"]["tag"], "box")
+        self.assertRegex(res["entry"]["added"], r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_add_is_idempotent(self):
+        self.core.add("10.0.0.1", ["a.htb"])
+        self.core.add("10.0.0.1", ["a.htb"])
+        line = self.block_lines()[0]
+        self.assertEqual(line.count("a.htb"), 1)
+        self.assertEqual(len(self.block_lines()), 1)
+
+    def test_add_merges_same_ip(self):
+        self.core.add("10.0.0.1", ["a.htb"])
+        self.core.add("10.0.0.1", ["b.htb"])
+        self.assertEqual(len(self.block_lines()), 1)
+        entries = self.core.list_entries()
+        self.assertEqual(sorted(entries[0]["hostnames"]), ["a.htb", "b.htb"])
+
+    def test_add_rehomes_hostname(self):
+        self.core.add("10.0.0.1", ["a.htb"])
+        self.core.add("10.0.0.2", ["a.htb"])  # move a.htb to a new IP
+        entries = self.core.list_entries()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["ip"], "10.0.0.2")
+
+    def test_add_warns_when_outside_block(self):
+        # nas.homelab.lan exists in the infra section (outside the block)
+        res = self.core.add("10.0.0.9", ["nas.homelab.lan"])
+        self.assertTrue(any("outside" in w for w in res["warnings"]))
+
+    def test_add_preserves_infra(self):
+        self.core.add("10.0.0.1", ["a.htb"])
+        text = self.read()
+        self.assertIn("127.0.0.1\tlocalhost", text)
+        self.assertIn("ip6-loopback", text)
+        self.assertIn("nas.homelab.lan", text)
+
+    def test_add_rejects_bad_input(self):
+        with self.assertRaises(self.core.HostsError):
+            self.core.add("bad-ip", ["a.htb"])
+        with self.assertRaises(self.core.HostsError):
+            self.core.add("10.0.0.1", ["bad host"])
+
+
+class TestRemoveCleanList(HostsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.core.add("10.0.0.1", ["a.htb", "www.a.htb"], tag="one")
+        self.core.add("10.0.0.2", ["b.htb"], tag="two")
+
+    def test_remove_one_hostname(self):
+        res = self.core.remove("www.a.htb")
+        self.assertEqual(len(res["removed"]), 1)
+        entries = self.core.list_entries()
+        first = next(e for e in entries if e["ip"] == "10.0.0.1")
+        self.assertEqual(first["hostnames"], ["a.htb"])
+
+    def test_remove_by_ip(self):
+        self.core.remove("10.0.0.1")
+        self.assertEqual([e["ip"] for e in self.core.list_entries()], ["10.0.0.2"])
+
+    def test_remove_missing(self):
+        res = self.core.remove("nope.htb")
+        self.assertEqual(res["removed"], [])
+        self.assertEqual(len(self.core.list_entries()), 2)
+
+    def test_clean_by_tag(self):
+        self.core.clean(tag="one")
+        self.assertEqual([e["tag"] for e in self.core.list_entries()], ["two"])
+
+    def test_clean_all_removes_block(self):
+        self.core.clean()
+        self.assertEqual(self.core.list_entries(), [])
+        self.assertNotIn(self.core.BEGIN, self.read())
+
+    def test_list_filter(self):
+        self.assertEqual(len(self.core.list_entries()), 2)
+        self.assertEqual(len(self.core.list_entries(tag="two")), 1)
+
+
+class TestMigrate(HostsTestCase):
+    initial = (
+        "127.0.0.1\tlocalhost\n"
+        "::1 localhost ip6-localhost\n"
+        "10.10.11.3 app.blurry.htb\n"
+        "10.10.11.7 sequel.htb dc01.sequel.htb\n"
+        "10.10.11.9 target.vl\n"
+    )
+
+    def test_migrate_partitions(self):
+        res = self.core.migrate()
+        self.assertEqual(len(res["imported"]), 3)  # blurry, sequel, target
+        inside = "\n".join(self.block_lines())
+        self.assertIn("app.blurry.htb", inside)
+        self.assertIn("target.vl", inside)
+        # universal infra (localhost/IPv6) stays outside the block
+        outside = self.read().split(self.core.BEGIN)[0]
+        self.assertIn("localhost", outside)
+        self.assertNotIn("app.blurry.htb", outside)
+
+    def test_migrate_tags_by_box(self):
+        self.core.migrate()
+        tags = {e["tag"] for e in self.core.list_entries()}
+        self.assertEqual(tags, {"blurry", "sequel", "target"})
+
+    def test_migrate_dedupes(self):
+        self.core.add("10.10.11.3", ["app.blurry.htb"], tag="blurry")
+        self.core.migrate()  # blurry already managed -> must not duplicate
+        blurry = [e for e in self.core.list_entries() if "app.blurry.htb" in e["hostnames"]]
+        self.assertEqual(len(blurry), 1)
+
+    def test_migrate_lossless(self):
+        before = set(self.read().split()) - {self.core.BEGIN}
+        self.core.migrate()
+        after = set(w for w in self.read().split() if not w.startswith("#"))
+        self.assertTrue(before.issubset(after))
+
+
+class TestMigrateKeep(HostsTestCase):
+    initial = "127.0.0.1\tlocalhost\n10.20.0.9 nas.homelab.lan\n10.10.11.3 box.htb\n"
+
+    def setUp(self):
+        super().setUp()
+        self.core._KEEP_EXTRA = ["homelab.lan"]  # emulate HTB_HOSTS_KEEP=homelab.lan
+
+    def test_keep_extra_stays_outside(self):
+        self.core.migrate()
+        inside = "\n".join(self.block_lines())
+        outside = self.read().split(self.core.BEGIN)[0]
+        self.assertIn("box.htb", inside)  # normal host is imported
+        self.assertIn("nas.homelab.lan", outside)  # kept-domain host stays out
+        self.assertNotIn("homelab.lan", inside)
+
+
+class TestFileHandling(HostsTestCase):
+    def test_edit_is_in_place(self):
+        """The ACL-preservation invariant: writes must not change the inode."""
+        ino_before = os.stat(self.hosts).st_ino
+        self.core.add("10.0.0.1", ["a.htb"])
+        self.assertEqual(os.stat(self.hosts).st_ino, ino_before)
+
+    def test_backup_written(self):
+        self.core.add("10.0.0.1", ["a.htb"])
+        backups = os.listdir(self.core.BACKUP_DIR)
+        self.assertTrue(any(b.startswith("hosts.bak.") for b in backups))
+
+    def test_no_write_when_unchanged(self):
+        self.core.add("10.0.0.1", ["a.htb"])
+        mtime = os.stat(self.hosts).st_mtime_ns
+        self.core.remove("does-not-exist.htb")  # no-op -> file must be untouched
+        self.assertEqual(os.stat(self.hosts).st_mtime_ns, mtime)
+
+    def test_doctor_reports_ok(self):
+        info = self.core.doctor()
+        self.assertTrue(info["ok"])
+        self.assertTrue(info["writable"])
+
+    def test_concurrent_adds(self):
+        """flock must serialize writers so no entry is lost or corrupted."""
+
+        def worker(i):
+            self.core.add(f"10.50.0.{i}", [f"c{i}.htb"], tag=f"c{i}")
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(1, 13)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(len(self.core.list_entries()), 12)
+        self.assertEqual(self.read().count(self.core.BEGIN), 1)
+
+
+class TestExclude(HostsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.core.add("10.10.11.5", ["forest.htb", "dc01.forest.htb"], tag="forest")
+        self.core.add("10.20.0.6", ["WEB.FOREST.HTB", "WEB"], tag="forest")  # uppercase
+        self.core.add("10.10.11.7", ["sequel.htb"], tag="sequel")
+        self.core.add("10.10.11.8", ["app.blurry.htb"], tag="blurry")
+
+    def test_exclude_keeps_fuzzy_matches(self):
+        res = self.core.clean(exclude=["forest"])
+        # both forest entries survive (incl. the upper-case WEB.FOREST.HTB)
+        surviving = {e["ip"] for e in self.core.list_entries()}
+        self.assertEqual(surviving, {"10.10.11.5", "10.20.0.6"})
+        self.assertEqual(len(res["removed"]), 2)
+
+    def test_exclude_is_case_insensitive(self):
+        self.core.clean(exclude=["FOREST"])
+        self.assertEqual(len(self.core.list_entries()), 2)
+
+    def test_exclude_multiple_patterns(self):
+        self.core.clean(exclude=["forest", "sequel"])
+        tags = sorted(e["tag"] for e in self.core.list_entries())
+        self.assertEqual(tags, ["forest", "forest", "sequel"])
+
+    def test_exclude_matches_hostname_substring(self):
+        self.core.clean(exclude=["blurry"])
+        self.assertEqual([e["tag"] for e in self.core.list_entries()], ["blurry"])
+
+    def test_tag_and_exclude_mutually_exclusive(self):
+        with self.assertRaises(self.core.HostsError):
+            self.core.clean(tag="forest", exclude=["sequel"])
+
+
+class TestShow(HostsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.core.add("10.10.11.5", ["forest.htb"], tag="forest")
+        self.core.add("10.20.0.5", ["dc01.forest.htb"], tag="forest")
+        self.core.add("10.10.11.7", ["sequel.htb"], tag="sequel")
+
+    def test_groups_by_box(self):
+        data = self.core.show_data()
+        self.assertEqual(data["managed_count"], 3)
+        self.assertEqual(data["box_count"], 2)
+        self.assertEqual(len(data["groups"]["forest"]), 2)
+        self.assertNotIn("unmanaged", data)
+
+    def test_full_includes_unmanaged(self):
+        data = self.core.show_data(full=True)
+        unmanaged = " ".join(h for e in data["unmanaged"] for h in e["hostnames"])
+        self.assertIn("localhost", unmanaged)
+        self.assertIn("nas.homelab.lan", unmanaged)
+
+    def test_outside_entries_excludes_managed(self):
+        outside = self.core.outside_entries()
+        hosts = {h for e in outside for h in e["hostnames"]}
+        self.assertNotIn("forest.htb", hosts)  # managed, so not "outside"
+        self.assertIn("localhost", hosts)
+
+    def test_comment_lines_not_parsed_as_entries(self):
+        outside = self.core.outside_entries()
+        # a '# comment' line must never show up as an entry with ip '#'
+        self.assertFalse(any(e["ip"].startswith("#") for e in outside))
+
+
+class TestCommentLines(HostsTestCase):
+    initial = "# a comment header\n127.0.0.1 localhost\n10.0.0.5 real.htb\n"
+
+    def test_comment_ignored(self):
+        outside = self.core.outside_entries()
+        ips = {e["ip"] for e in outside}
+        self.assertEqual(ips, {"127.0.0.1", "10.0.0.5"})
+
+
+class TestRetag(HostsTestCase):
+    def test_retag_regroups_by_box(self):
+        # simulate old-style bulk tag
+        self.core.add("10.10.11.5", ["control.fleet.forest.htb"], tag="imported")
+        self.core.add("10.20.0.5", ["dc01.forest.htb"], tag="imported")
+        self.core.add("10.20.0.9", ["fileserver.corp.local"], tag="imported")
+        res = self.core.retag()
+        self.assertEqual(len(res["retagged"]), 3)
+        tags = {e["ip"]: e["tag"] for e in self.core.list_entries()}
+        self.assertEqual(tags["10.10.11.5"], "forest")
+        self.assertEqual(tags["10.20.0.5"], "forest")
+        self.assertEqual(tags["10.20.0.9"], "corp")
+
+    def test_retag_is_noop_when_correct(self):
+        self.core.add("10.0.0.1", ["a.htb"])  # already tag=a
+        res = self.core.retag()
+        self.assertEqual(res["retagged"], [])
+
+
+class TestBackupRestore(HostsTestCase):
+    def test_backup_creates_named_snapshot(self):
+        self.core.add("10.0.0.1", ["a.htb"])
+        res = self.core.backup(label="checkpoint")
+        self.assertIn("checkpoint", res["name"])
+        self.assertTrue(res["name"].startswith(self.core.SAVE_PREFIX))
+        names = [b["name"] for b in self.core.list_backups()]
+        self.assertIn(res["name"], names)
+
+    def test_restore_latest(self):
+        self.core.add("10.0.0.1", ["keep.htb"])
+        self.core.backup(label="good")
+        self.core.clean()  # blow away the block
+        self.assertEqual(self.core.list_entries(), [])
+        self.core.restore()  # most recent snapshot is the "good" one
+        self.assertIn("keep.htb", self.read())
+
+    def test_restore_by_label(self):
+        self.core.add("10.0.0.1", ["first.htb"])
+        self.core.backup(label="first")
+        self.core.add("10.0.0.2", ["second.htb"])
+        self.core.backup(label="second")
+        self.core.restore("first")
+        hosts = {h for e in self.core.list_entries() for h in e["hostnames"]}
+        self.assertEqual(hosts, {"first.htb"})
+
+    def test_restore_preserves_inode(self):
+        self.core.add("10.0.0.1", ["a.htb"])
+        self.core.backup(label="x")
+        ino = os.stat(self.hosts).st_ino
+        self.core.restore()
+        self.assertEqual(os.stat(self.hosts).st_ino, ino)
+
+    def test_restore_without_backups_errors(self):
+        with self.assertRaises(self.core.HostsError):
+            self.core.restore()
+
+
+if __name__ == "__main__":
+    unittest.main()

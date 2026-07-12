@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pylint.d/
+
+# Local agent working notes — not committed
+CLAUDE.md

@@ -1,0 +1,15 @@
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint.main]
+# The CLI entrypoint is named `htb-hosts` (no .py); lint it via a temp copy.
+py-version = "3.11"
+
+[tool.pylint."messages control"]
+# Dispatcher-shaped functions legitimately have many branches/returns; those
+# are suppressed inline at the call sites rather than globally.
+disable = []
