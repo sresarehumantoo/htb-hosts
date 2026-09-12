@@ -118,11 +118,23 @@ class TestTools(McpTestCase):
         payload = json.loads(self.text(reply))
         self.assertTrue(any("snap" in b["name"] for b in payload["backups"]))
 
+    def test_add_accepts_a_comma_separated_string(self):
+        self.call(
+            "htb_hosts_add",
+            {"ip": "10.10.11.6", "hostnames": "example.local, jobs.example.local"},
+        )
+        self.assertEqual(len(self.core.list_entries()[0]["hostnames"]), 2)
+
     def test_tools_list_has_new_tools(self):
         reply = self.mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = {t["name"] for t in reply["result"]["tools"]}
         self.assertTrue(
-            {"htb_hosts_retag", "htb_hosts_backup", "htb_hosts_restore", "htb_hosts_list_backups"}
+            {
+                "htb_hosts_retag",
+                "htb_hosts_backup",
+                "htb_hosts_restore",
+                "htb_hosts_list_backups",
+            }
             <= names
         )
 

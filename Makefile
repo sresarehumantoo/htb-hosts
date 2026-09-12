@@ -109,7 +109,7 @@ smoke: ## Quick end-to-end CLI check against a throwaway hosts file
 		export HTB_HOSTS_FILE=$$f HTB_HOSTS_BACKUP_DIR=$$d; \
 		PY=src/htb-hosts; \
 		python3 $$PY add machine.htb 10.129.45.2 www.machine.htb; \
-		python3 $$PY add 10.129.223.2 sequel.htb --tag sequel; \
+		python3 $$PY add 10.129.223.2 "sequel.htb, dc01.sequel.htb"; \
 		python3 $$PY backup --label smoke; \
 		python3 $$PY list; \
 		python3 $$PY clean --exclude sequel; \

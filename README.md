@@ -85,6 +85,7 @@ everything, including the managed block and ACL).
 
 ```console
 htb-hosts add 10.10.11.161 forest.htb dc01.forest.htb   # IP and hosts in any order
+htb-hosts add 10.10.11.161 "forest.htb, dc01.forest.htb"  # ...or one quoted string
 htb-hosts add www.forest.htb 10.10.11.161 --tag forest  # extra vhost, same box
 htb-hosts show                                          # box-grouped overview
 htb-hosts show full                                     # also show unmanaged/system lines
@@ -97,7 +98,8 @@ htb-hosts doctor                                        # check access / show th
 ```
 
 The IP can go anywhere in the arguments — `htb-hosts add forest.htb 10.10.11.161`
-works too. Add `--json` to most commands for machine-readable output.
+works too, and any single argument may carry several names separated by commas or
+spaces. Add `--json` to most commands for machine-readable output.
 
 ### Command reference
 

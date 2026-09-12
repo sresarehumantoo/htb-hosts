@@ -109,7 +109,9 @@ class TestAdd(HostsTestCase):
         with self.assertRaises(self.core.HostsError):
             self.core.add("bad-ip", ["a.htb"])
         with self.assertRaises(self.core.HostsError):
-            self.core.add("10.0.0.1", ["bad host"])
+            # splitting on whitespace/commas never lets an invalid token through:
+            # '#' would start a comment, so it must still be rejected.
+            self.core.add("10.0.0.1", ["bad#host"])
 
 
 class TestRemoveCleanList(HostsTestCase):
@@ -401,6 +403,34 @@ class TestBackupHardening(HostsTestCase):
         self.core.BACKUP_DIR = os.path.join(blocker, "nope")
         with self.assertRaises(OSError):
             self.core.backup(label="x")
+
+
+class TestParseTokens(HostsTestCase):
+    def test_splits_on_comma_and_space(self):
+        self.assertEqual(
+            self.core.parse_tokens("a.htb, b.htb c.htb"),
+            ["a.htb", "b.htb", "c.htb"],
+        )
+
+    def test_flattens_a_list_of_mixed_tokens(self):
+        self.assertEqual(
+            self.core.parse_tokens(["10.0.0.1", "a.htb,b.htb"]),
+            ["10.0.0.1", "a.htb", "b.htb"],
+        )
+
+    def test_empty_and_none(self):
+        self.assertEqual(self.core.parse_tokens(None), [])
+        self.assertEqual(self.core.parse_tokens("  ,, "), [])
+
+    def test_add_accepts_a_comma_separated_string(self):
+        res = self.core.add("10.10.11.6", "example.local, jobs.example.local")
+        self.assertEqual(res["entry"]["hostnames"], ["example.local", "jobs.example.local"])
+        self.assertEqual(res["entry"]["tag"], "example")
+
+    def test_split_ip_and_hosts_expands_one_argument(self):
+        ip, hosts = self.core.split_ip_and_hosts(["10.10.11.6", "a.htb, b.htb"])
+        self.assertEqual(ip, "10.10.11.6")
+        self.assertEqual(hosts, ["a.htb", "b.htb"])
 
 
 class TestDoctorMarkers(HostsTestCase):

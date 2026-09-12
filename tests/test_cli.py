@@ -51,6 +51,19 @@ class TestCliAdd(CliTestCase):
         self.assertEqual(code, 2)
         self.assertIn("no IP", err)
 
+    def test_add_comma_separated_hostnames(self):
+        code, _, _ = self.run_cli("add", "10.10.11.6", "example.local, jobs.example.local")
+        self.assertEqual(code, 0)
+        entries = self.core.list_entries()
+        self.assertEqual(entries[0]["hostnames"], ["example.local", "jobs.example.local"])
+
+    def test_add_all_in_one_argument(self):
+        code, _, _ = self.run_cli("add", "10.10.11.6 example.local,jobs.example.local")
+        self.assertEqual(code, 0)
+        entries = self.core.list_entries()
+        self.assertEqual(entries[0]["ip"], "10.10.11.6")
+        self.assertEqual(len(entries[0]["hostnames"]), 2)
+
     def test_add_warning_to_stderr(self):
         code, _, err = self.run_cli("add", "10.0.0.9", "nas.homelab.lan")
         self.assertEqual(code, 0)

@@ -41,6 +41,10 @@ _LABEL = r"[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?"
 _HOSTNAME_RE = re.compile(rf"^{_LABEL}(?:\.{_LABEL})*$")
 _ENTRY_RE = re.compile(r"^\s*(?P<ip>\S+)\s+(?P<hosts>[^#]+?)\s*(?:#\s*(?P<comment>.*))?$")
 
+# Separators accepted inside a single host argument, so one shell-quoted string
+# can carry several names: "a.htb, b.htb" / "a.htb,b.htb" / "a.htb b.htb".
+_TOKEN_SEP_RE = re.compile(r"[,;\s]+")
+
 # Hostnames/patterns that always stay OUTSIDE the managed block on migrate.
 _INFRA_TOKENS = ("localhost", "ip6-", "ff02::", "ff00::")
 
@@ -93,22 +97,40 @@ def default_tag(hostname: str) -> str:
     return labels[0]
 
 
+def parse_tokens(value: Any) -> list[str]:
+    """Flatten a string or list of strings into individual tokens.
+
+    Each item is split on commas, semicolons and whitespace, so a single quoted
+    argument can carry several hostnames:
+        "example.local, jobs.example.local"  ->  two tokens
+    Order is preserved; empty fragments are dropped.
+    """
+    items = [value] if isinstance(value, str) else list(value or [])
+    out: list[str] = []
+    for item in items:
+        for part in _TOKEN_SEP_RE.split(str(item).strip()):
+            if part:
+                out.append(part)
+    return out
+
+
 def split_ip_and_hosts(tokens: list[str]) -> tuple[str, list[str]]:
     """Split mixed positional tokens (in any order) into (ip, hostnames).
 
     Lets callers pass `machine.htb 10.129.45.2` or `10.129.45.2 machine.htb`
-    interchangeably. Raises HostsError unless exactly one token is an IP.
+    interchangeably, and accepts comma/space separated groups inside a single
+    argument. Raises HostsError unless exactly one token is an IP.
     """
     ips: list[str] = []
     hosts: list[str] = []
-    for token in tokens:
+    for token in parse_tokens(tokens):
         try:
             ipaddress.ip_address(token.strip())
             ips.append(token.strip())
         except ValueError:
             hosts.append(token)
     if not ips:
-        raise HostsError(f"no IP address found in: {' '.join(tokens)}")
+        raise HostsError(f"no IP address found in: {' '.join(parse_tokens(tokens))}")
     if len(ips) > 1:
         raise HostsError(f"multiple IPs given ({', '.join(ips)}); expected exactly one")
     return ips[0], hosts
@@ -326,13 +348,14 @@ def _transaction(mutate: Mutator) -> Any:
 # --------------------------------------------------------------------------- #
 # Operations
 # --------------------------------------------------------------------------- #
-def add(ip: str, hostnames: list[str], tag: Optional[str] = None) -> Dict:
+def add(ip: str, hostnames: Any, tag: Optional[str] = None) -> Dict:
     """Add or update a managed entry; idempotent upsert keyed on IP.
 
+    `hostnames` may be a list or a single comma/space separated string.
     Returns {"entry": <dict>, "warnings": [<str>, ...]}.
     """
     ip = validate_ip(ip)
-    hostnames = [validate_hostname(h) for h in hostnames]
+    hostnames = [validate_hostname(h) for h in parse_tokens(hostnames)]
     if not hostnames:
         raise HostsError("at least one hostname is required")
     tag = validate_tag(tag) if tag else default_tag(hostnames[0])

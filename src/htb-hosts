@@ -165,7 +165,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "args",
         nargs="+",
         metavar="IP/HOSTNAME",
-        help="the IP and one or more hostnames, in any order",
+        help=(
+            "the IP and one or more hostnames, in any order; a single argument may "
+            'carry several, comma or space separated ("a.htb, b.htb")'
+        ),
     )
     p_add.add_argument("--tag", help="group tag (defaults to the box name)")
     p_add.add_argument("--json", action="store_true")

@@ -2,7 +2,7 @@
 """Zero-dependency stdio MCP server for htb-hosts.
 
 Speaks MCP over line-delimited JSON-RPC 2.0 on stdin/stdout (no SDK required).
-Exposes four tools that add/remove/list/clean HTB host entries in /etc/hosts
+Exposes tools that add/remove/list/select/clean HTB host entries in /etc/hosts
 without sudo, backed by the shared core library.
 """
 
@@ -34,10 +34,13 @@ TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "ip": {"type": "string", "description": "Box IP, e.g. 10.129.45.2"},
                 "hostnames": {
-                    "type": "array",
+                    "type": ["array", "string"],
                     "items": {"type": "string"},
                     "minItems": 1,
-                    "description": "One or more hostnames, e.g. ['machine.htb','www.machine.htb']",
+                    "description": (
+                        "One or more hostnames, e.g. ['machine.htb','www.machine.htb']. "
+                        "A single comma/space separated string also works."
+                    ),
                 },
                 "tag": {
                     "type": "string",
