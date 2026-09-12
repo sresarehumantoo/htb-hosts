@@ -13,7 +13,10 @@ import json
 import sys
 from typing import Optional, Sequence
 
-sys.path.insert(0, "/opt/htb-hosts")
+# Appended, not inserted: sys.path[0] is the script's own directory, so running
+# straight out of a source checkout picks up the sibling htb_hosts.py, while the
+# installed CLI (in a bindir with no library next to it) falls through to /opt.
+sys.path.append("/opt/htb-hosts")
 import htb_hosts as hh  # noqa: E402  pylint: disable=wrong-import-position
 
 
