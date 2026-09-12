@@ -132,10 +132,10 @@ smoke: ## Quick end-to-end CLI check against a throwaway hosts file
 		python3 $$PY add 10.129.223.2 "sequel.htb, dc01.sequel.htb"; \
 		[ "$$(python3 $$PY get sequel)" = 10.129.223.2 ] \
 			|| (echo "get did not return the bare IP" && exit 1); \
-		[ "$$(python3 $$PY show dc01 --host)" = dc01.sequel.htb ] \
-			|| (echo "show <pattern> did not select the hostname" && exit 1); \
-		[ "$$(python3 $$PY get sequel --host --first)" = sequel.htb ] \
-			|| (echo "--first did not pick the first of two hostnames" && exit 1); \
+		[ "$$(python3 $$PY get dc01 --host)" = dc01.sequel.htb ] \
+			|| (echo "get <pattern> did not select the hostname" && exit 1); \
+		[ "$$(python3 $$PY get sequel --host -i 1)" = sequel.htb ] \
+			|| (echo "--index 1 did not pick the first of two hostnames" && exit 1); \
 		[ "$$(python3 $$PY get sequel --host -i -1)" = dc01.sequel.htb ] \
 			|| (echo "--index -1 did not pick the last hostname" && exit 1); \
 		[ "$$(python3 $$PY get sequel --host --sep ,)" = sequel.htb,dc01.sequel.htb ] \
@@ -153,11 +153,14 @@ smoke: ## Quick end-to-end CLI check against a throwaway hosts file
 		python3 $$PY complete commands | grep -qx get \
 			|| (echo "complete commands missing get" && exit 1); \
 		python3 $$PY backup --label smoke; \
-		python3 $$PY list; \
+		python3 $$PY show --flat; \
+		[ "$$(python3 $$PY show machine --flat | wc -l)" = 2 ] \
+			|| (echo "show PATTERN did not filter" && exit 1); \
+		python3 $$PY clean --match machine --yes; \
 		python3 $$PY clean --exclude sequel; \
 		python3 $$PY clean; \
 		python3 $$PY restore; \
-		python3 $$PY list; \
+		python3 $$PY show --flat; \
 		python3 $$PY clean; \
 		! grep -q '>>> htb-hosts' $$f || (echo "managed block not removed" && exit 1); \
 		rm -rf $$f $$d; echo "==> smoke test passed"

@@ -2,7 +2,7 @@
 """Zero-dependency stdio MCP server for htb-hosts.
 
 Speaks MCP over line-delimited JSON-RPC 2.0 on stdin/stdout (no SDK required).
-Exposes tools that add/remove/list/select/clean HTB host entries in /etc/hosts
+Exposes tools that add/remove/select/show/clean HTB host entries in /etc/hosts
 without sudo, backed by the shared core library.
 """
 
@@ -62,29 +62,32 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "htb_hosts_list",
-        "description": "List host entries currently in the managed block.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"tag": {"type": "string", "description": "Optional tag filter"}},
-        },
-    },
-    {
         "name": "htb_hosts_clean",
         "description": (
             "Remove managed host entries. No args wipes the whole block; `tag` "
-            "removes one box; `exclude` removes everything EXCEPT fuzzy matches "
-            "(e.g. exclude=['forest'] keeps every forest entry and clears the rest). "
-            "`tag` and `exclude` are mutually exclusive."
+            "removes one box by its exact tag; `match` removes the entries "
+            "htb_hosts_select would return for the same patterns (every pattern "
+            "must match); `exclude` is the inverse keep-list, removing everything "
+            "EXCEPT entries matching ANY pattern. The three are mutually exclusive. "
+            "Set dry_run to preview what would go without touching the file."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "tag": {"type": "string", "description": "Remove only entries with this exact tag"},
+                "match": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Remove entries matching EVERY pattern (as htb_hosts_select)",
+                },
                 "exclude": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Fuzzy patterns to KEEP; everything else is removed",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Report what would be removed without changing the file",
                 },
             },
         },
@@ -92,13 +95,20 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "htb_hosts_show",
         "description": (
-            "Structured overview of managed hosts grouped by box (tag). Set "
-            "full=true to also include unmanaged/system entries (localhost, etc.)."
+            "Structured overview of the managed hosts, both flat ('entries') and "
+            "grouped by box ('groups'). `patterns` narrows to the entries they "
+            "select, exactly as htb_hosts_select does. Set full=true to also "
+            "include unmanaged/system entries (localhost, etc.)."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "full": {"type": "boolean", "description": "Also include unmanaged entries"}
+                "patterns": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Fuzzy patterns to narrow to; omit for everything",
+                },
+                "full": {"type": "boolean", "description": "Also include unmanaged entries"},
             },
         },
     },
@@ -107,8 +117,9 @@ TOOLS: list[dict[str, Any]] = [
         "description": (
             "Look up managed entries by fuzzy pattern and return just their bare "
             "values, ready to feed into another command. `patterns` matches against "
-            "ip/tag/hostname; `field` picks what comes back: 'ip' (default), 'host', "
-            "or 'both'. Use this to resolve a box name to its IP before scanning."
+            "ip/tag/hostname, and several patterns NARROW (every one must match). "
+            "`field` picks what comes back: 'ip' (default) or 'host'. Use this to "
+            "resolve a box name to its IP before scanning."
         ),
         "inputSchema": {
             "type": "object",
@@ -120,7 +131,7 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "field": {
                     "type": "string",
-                    "enum": ["ip", "host", "both"],
+                    "enum": ["ip", "host"],
                     "description": "Which values to return (default 'ip')",
                 },
                 "index": {
@@ -172,12 +183,13 @@ def _call_tool(name: str, args: dict[str, Any]) -> hh.Dict:
     handlers = {
         "htb_hosts_add": lambda: hh.add(args["ip"], args["hostnames"], args.get("tag")),
         "htb_hosts_remove": lambda: hh.remove(args["selector"]),
-        "htb_hosts_list": lambda: {"entries": hh.list_entries(args.get("tag"))},
-        "htb_hosts_show": lambda: hh.show_data(bool(args.get("full"))),
+        "htb_hosts_show": lambda: hh.show_data(bool(args.get("full")), args.get("patterns")),
         "htb_hosts_select": lambda: hh.select(
             args.get("patterns"), args.get("field") or "ip", args.get("index")
         ),
-        "htb_hosts_clean": lambda: hh.clean(args.get("tag"), args.get("exclude")),
+        "htb_hosts_clean": lambda: hh.clean(
+            args.get("tag"), args.get("exclude"), args.get("match"), bool(args.get("dry_run"))
+        ),
         "htb_hosts_retag": hh.retag,
         "htb_hosts_backup": lambda: hh.backup(args.get("label")),
         "htb_hosts_restore": lambda: hh.restore(args.get("name")),

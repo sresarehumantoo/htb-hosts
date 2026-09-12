@@ -100,14 +100,16 @@ htb-hosts add 10.10.11.161 forest.htb dc01.forest.htb   # IP and hosts in any or
 htb-hosts add 10.10.11.161 "forest.htb, dc01.forest.htb"  # ...or one quoted string
 htb-hosts add www.forest.htb 10.10.11.161 --tag forest  # extra vhost, same box
 htb-hosts show                                          # box-grouped overview
-htb-hosts show full                                     # also show unmanaged/system lines
+htb-hosts show forest                                   # ...narrowed to one box
+htb-hosts show --flat                                   # one line per entry
+htb-hosts show --full                                   # also show unmanaged/system lines
 htb-hosts get forest                                    # just the IP, for $(...)
 htb-hosts get forest --host                             # just the hostnames
-htb-hosts get forest --host --first                     # just the first hostname
+htb-hosts get forest --host -i 1                        # just the first hostname
 htb-hosts get forest --host -n                          # numbered, to pick an index
-htb-hosts list                                          # flat list of managed entries
 htb-hosts rm forest.htb                                 # remove one hostname
 htb-hosts clean --tag forest                            # remove a whole box
+htb-hosts clean --match forest fleet                    # remove what `get` would show
 htb-hosts clean --exclude forest                        # remove everything EXCEPT forest
 htb-hosts clean                                         # wipe all managed entries
 htb-hosts doctor                                        # check access / show the fix
@@ -123,33 +125,33 @@ spaces. Add `--json` to most commands for machine-readable output.
 |---------|--------------|
 | `add <ip> <host…>` | Add/update an entry (idempotent; merges by IP) |
 | `rm <host\|ip>` | Remove a hostname or a whole IP from the block |
-| `show [full]` | Pretty, box-grouped overview (`full` adds unmanaged lines) |
-| `show <pattern>` / `get <pattern>` | Bare values for matching entries, for `$(…)` |
-| `get … --index N` / `--first` | Keep only the Nth value when a box has several |
-| `list [--tag T]` | Flat list of managed entries |
-| `clean [--tag T \| --exclude P…]` | Remove all, one box, or all-but-matches |
+| `show [pattern…]` | Box-grouped view, narrowed to the pattern (`--flat`, `--full`) |
+| `get [pattern…]` | Bare values for matching entries, for `$(…)` |
+| `get … -i N` | Keep only the Nth value when a box has several |
+| `clean [--tag T \| --match P… \| --exclude P…]` | Remove all, one box, a fuzzy match, or all-but-matches |
 | `retag` | Re-derive every tag from its box name |
 | `backup [--label L]` | Save an explicit snapshot |
 | `restore [--list] [name]` | Roll back to a snapshot |
 | `migrate` | Import existing `/etc/hosts` entries into the block |
 | `doctor` | Check access + managed-block integrity; print the exact fix |
 
+> **One rule for the two read commands:** `show` is for your eyes, `get` is for
+> your pipes. Both take the same patterns; only `get` promises bare, parseable
+> output.
+
 ### Selecting values for other tools
 
-`get` (alias `select`) prints nothing but the values of the entries matching a
-fuzzy pattern — one per line, deduplicated — so they drop straight into another
-command. `show <pattern>` is the same thing, for when `show` is already in your
-fingers:
+`get` prints nothing but the values of the entries matching a fuzzy pattern —
+one per line, deduplicated — so they drop straight into another command:
 
 ```bash
 nmap -p- $(htb-hosts get forest)                   # -> 10.10.11.161
 ffuf -u "http://$(htb-hosts get forest --host)/FUZZ" -w words.txt
-htb-hosts get forest --both                        # IP and every hostname
 htb-hosts get                                      # every managed IP
 ```
 
 The pattern is matched case-insensitively against each entry's IP, tag, and
-hostnames. `--ip` (the default), `--host`, and `--both` choose what gets printed;
+hostnames. `--host` switches the output from IPs to hostnames;
 with `--host`, the output narrows to the hostnames that actually matched
 (`get jobs --host` → `jobs.example.htb`), falling back to all of the entry's names
 when the match came from its IP or tag.
@@ -186,14 +188,14 @@ $ htb-hosts get forest --host -n
 2  dc01.forest.htb
 3  www.forest.htb
 
-$ curl "http://$(htb-hosts get forest --host --first)/"    # -> forest.htb
+$ curl "http://$(htb-hosts get forest --host -i 1)/"       # -> forest.htb
 $ htb-hosts get forest --host -i 2                         # -> dc01.forest.htb
 $ htb-hosts get forest --host -i -1                        # last one
 $ htb-hosts get forest --host -i 2-3                       # a range
 $ htb-hosts get forest --host -i 1,3                       # a list, in that order
 ```
 
-`--first` is shorthand for `--index 1`. An out-of-range index is an error (exit
+An out-of-range index is an error (exit
 `2`, empty stdout) rather than a silent drop, for the same reason an empty match
 is: a pipeline should never quietly get fewer arguments than you asked for.
 
@@ -223,8 +225,8 @@ now, not a static list.
 | `htb-hosts add … --<TAB>` | that subcommand's flags |
 
 Completion is also **scoped and field-aware**: once you have typed a pattern, the
-next one completes only from what that selection contains, and `--host`/`--both`
-restrict the menu to values that field can actually print. Accepting a suggestion
+next one completes only from what that selection contains, and `--host` restricts
+the menu to the hostnames that field can actually print. Accepting a suggestion
 therefore always does what the menu implied — which is why patterns narrow.
 
 The scripts get their data from `htb-hosts complete <kind> [pattern…]`, a hidden
@@ -242,6 +244,29 @@ forest` clears it in one go. Re-derive tags for existing entries any time:
 ```bash
 htb-hosts retag
 ```
+
+### Removing a fuzzy match: `clean --match`
+
+`--match` takes the same patterns as `get`, so what you selected is what goes:
+
+```console
+$ htb-hosts get example web --host      # check first
+web01.example.htb
+web02.example.htb
+
+$ htb-hosts clean --match example web
+will remove 2 entries:
+  10.10.11.8     web01.example.htb  [tag=example]
+  10.10.11.8     web02.example.htb  [tag=example]
+proceed? [y/N] y
+cleaned 2 entry/entries (~example web)
+```
+
+Because a fuzzy pattern is the one removal you cannot verify by reading the
+command line, `--match` prints its plan and asks whenever it would remove more
+than one entry. `--yes` skips the prompt, and `--json` implies it; with no
+terminal to ask, it refuses rather than guessing. The exact modes (`--tag`,
+`--exclude`, bare `clean`) are unchanged and still act immediately.
 
 ### Keep-all-but: fuzzy `--exclude`
 
@@ -278,9 +303,10 @@ claude mcp add -s user htb-hosts -- python3 /opt/htb-hosts/mcp_server.py
 <details>
 <summary>Tools exposed (server name <code>htb-hosts</code>)</summary>
 
-`htb_hosts_add`, `htb_hosts_remove`, `htb_hosts_list`, `htb_hosts_show`,
-`htb_hosts_select`, `htb_hosts_clean` (accepts `exclude`), `htb_hosts_retag`,
-`htb_hosts_backup`, `htb_hosts_restore`, `htb_hosts_list_backups`.
+`htb_hosts_add`, `htb_hosts_remove`, `htb_hosts_show` (accepts `patterns`),
+`htb_hosts_select`, `htb_hosts_clean` (accepts `match`/`exclude`/`dry_run`),
+`htb_hosts_retag`, `htb_hosts_backup`, `htb_hosts_restore`,
+`htb_hosts_list_backups`.
 </details>
 
 ## How it works

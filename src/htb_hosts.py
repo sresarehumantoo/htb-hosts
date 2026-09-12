@@ -434,39 +434,51 @@ def _entry_matches(entry: Entry, patterns: list[str], require_all: bool = False)
     return quantifier(p in haystack for p in patterns)
 
 
-def clean(tag: Optional[str] = None, exclude: Optional[list[str]] = None) -> Dict:
+def clean(
+    tag: Optional[str] = None,
+    exclude: Optional[list[str]] = None,
+    match: Any = None,
+    dry_run: bool = False,
+) -> Dict:
     """Remove managed entries.
 
     - no args: wipe the whole managed block
     - `tag`: remove only entries with that exact tag
-    - `exclude`: remove everything EXCEPT entries fuzzily matching any pattern
-      (case-insensitive substring over ip/tag/hostnames)
+    - `match`: remove entries fuzzily matching *every* pattern — the same
+      selector language as `select`, so `clean --match example web` removes
+      exactly what `get example web` shows
+    - `exclude`: remove everything EXCEPT entries fuzzily matching *any* pattern
+      (additive keep-list; note the opposite quantifier to `match`)
 
-    `tag` and `exclude` are mutually exclusive.
+    The three are mutually exclusive. `dry_run` computes the same result without
+    touching the file, so a caller can show the user what is about to go.
     """
-    if tag and exclude:
-        raise HostsError("use either tag or exclude, not both")
+    modes = [bool(tag), bool(exclude), bool(match)]
+    if sum(modes) > 1:
+        raise HostsError("use only one of tag, exclude, or match")
     if tag:
         tag = validate_tag(tag)
-    patterns = [p.strip().lower() for p in (exclude or []) if p.strip()]
-    removed: list[Dict] = []
+    excludes = [p.strip().lower() for p in (exclude or []) if p.strip()]
+    matches = [p.lower() for p in parse_tokens(match)]
+
+    def keep(entry: Entry) -> bool:
+        if excludes:
+            return _entry_matches(entry, excludes)  # keep the excluded ones
+        if matches:
+            return not _entry_matches(entry, matches, require_all=True)
+        if tag is not None:
+            return entry.tag != tag
+        return False  # no filter -> remove everything
+
+    if dry_run:
+        _, entries, _ = _split(_read())
+        return {"removed": [e.to_dict() for e in entries if not keep(e)]}
 
     def mutate(
         pre: list[str], entries: list[Entry], post: list[str]
     ) -> tuple[list[str], list[Entry], list[str], list[Dict]]:
-        kept: list[Entry] = []
-        for entry in entries:
-            if patterns:
-                keep = _entry_matches(entry, patterns)  # keep the excluded ones
-            elif tag is not None:
-                keep = entry.tag != tag
-            else:
-                keep = False  # no filter -> remove everything
-            if keep:
-                kept.append(entry)
-            else:
-                removed.append(entry.to_dict())
-        entries[:] = kept
+        removed = [e.to_dict() for e in entries if not keep(e)]
+        entries[:] = [e for e in entries if keep(e)]
         return pre, entries, post, removed
 
     return {"removed": _transaction(mutate)}
@@ -494,18 +506,27 @@ def outside_entries() -> list[Dict]:
     return out
 
 
-def show_data(full: bool = False) -> Dict:
-    """Structured overview of managed hosts grouped by box (tag).
+def show_data(full: bool = False, patterns: Any = None) -> Dict:
+    """Structured overview of managed hosts, both flat ("entries") and grouped
+    by box ("groups").
 
-    With `full=True`, also includes the unmanaged/system entries.
+    `patterns` narrows to the entries they select, using the same rule as
+    `select`, so a pattern means one thing everywhere in the tool. With
+    `full=True`, the unmanaged/system entries are included too.
     """
-    managed = list_entries()
+    pats = [p.lower() for p in parse_tokens(patterns)]
+    _, entries, _ = _split(_read())
+    if pats:
+        entries = [e for e in entries if _entry_matches(e, pats, require_all=True)]
+    managed = [e.to_dict() for e in entries]
     groups: dict[str, list[Dict]] = {}
     for entry in managed:
         groups.setdefault(entry["tag"] or "(untagged)", []).append(entry)
     data: Dict = {
+        "patterns": pats,
         "managed_count": len(managed),
         "box_count": len(groups),
+        "entries": managed,
         "groups": groups,
     }
     if full:
@@ -520,8 +541,6 @@ SELECT_FIELDS = {
     "hosts": "host",
     "hostname": "host",
     "hostnames": "host",
-    "both": "both",
-    "all": "both",
 }
 
 
@@ -583,7 +602,7 @@ def select(patterns: Any = None, field: str = "ip", index: Any = None) -> Dict:
     case-insensitively against an entry's IP, tag and hostnames. Several patterns
     **narrow**: every one has to match, so `get example jobs` drills into the
     example box rather than adding a second one. `field` chooses what lands in
-    "values": "ip" (default), "host", or "both". Values are deduplicated in
+    "values": "ip" (default) or "host". Values are deduplicated in
     first-seen order, so `nmap $(htb-hosts get example)` gets a clean target
     list.
 
@@ -594,15 +613,15 @@ def select(patterns: Any = None, field: str = "ip", index: Any = None) -> Dict:
     """
     key = SELECT_FIELDS.get((field or "ip").strip().lower())
     if key is None:
-        raise HostsError(f"unknown field: {field!r} (use ip, host, or both)")
+        raise HostsError(f"unknown field: {field!r} (use ip or host)")
     pats = [p.lower() for p in parse_tokens(patterns)]
     _, entries, _ = _split(_read())
     matched = [e for e in entries if not pats or _entry_matches(e, pats, require_all=True)]
     values: list[str] = []
     for entry in matched:
-        if key in ("ip", "both"):
+        if key == "ip":
             values.append(entry.ip)
-        if key in ("host", "both"):
+        else:
             values.extend(_selected_hostnames(entry, pats))
     seen: set[str] = set()
     unique = [v for v in values if not (v in seen or seen.add(v))]

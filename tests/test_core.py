@@ -464,9 +464,10 @@ class TestSelect(HostsTestCase):
         values = self.core.select("10.10.11.6", "host")["values"]
         self.assertEqual(values, ["example.local", "jobs.example.local"])
 
-    def test_both_field(self):
-        values = self.core.select("forest", "both")["values"]
-        self.assertEqual(values, ["10.10.11.5", "dc01.forest.htb"])
+    def test_unknown_field_mentions_the_two_that_exist(self):
+        with self.assertRaises(self.core.HostsError) as caught:
+            self.core.select("forest", "both")
+        self.assertIn("use ip or host", str(caught.exception))
 
     def test_matches_by_tag_case_insensitively(self):
         self.assertEqual(self.core.select("FOREST")["values"], ["10.10.11.5"])

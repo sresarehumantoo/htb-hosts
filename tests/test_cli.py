@@ -77,15 +77,27 @@ class TestCliOther(CliTestCase):
         self.run_cli("add", "10.0.0.1", "a.htb", "www.a.htb", "--tag", "one")
         self.run_cli("add", "10.0.0.2", "b.htb", "--tag", "two")
 
-    def test_list(self):
-        code, out, _ = self.run_cli("list")
+    def test_show_flat(self):
+        code, out, _ = self.run_cli("show", "--flat")
         self.assertEqual(code, 0)
         self.assertIn("a.htb", out)
         self.assertIn("b.htb", out)
 
-    def test_list_json(self):
-        _, out, _ = self.run_cli("list", "--json")
-        self.assertEqual(len(json.loads(out)), 2)
+    def test_show_flat_json(self):
+        _, out, _ = self.run_cli("show", "--flat", "--json")
+        self.assertEqual(len(json.loads(out)["entries"]), 2)
+
+    def test_show_filters_by_pattern(self):
+        _, out, _ = self.run_cli("show", "b.htb")
+        self.assertIn("b.htb", out)
+        self.assertNotIn("a.htb", out)
+
+    def test_a_box_named_full_is_reachable(self):
+        """`show full` used to mean the wide overview, hiding a box of that name."""
+        self.run_cli("add", "10.0.0.3", "full.htb")
+        _, out, _ = self.run_cli("show", "full")
+        self.assertIn("full.htb", out)
+        self.assertNotIn("unmanaged / system", out)
 
     def test_rm(self):
         code, out, _ = self.run_cli("rm", "www.a.htb")
@@ -118,8 +130,8 @@ class TestCliOther(CliTestCase):
         self.assertIn("HTB hosts", out)
         self.assertIn("one (", out)  # box-grouped header
 
-    def test_show_full_positional(self):
-        code, out, _ = self.run_cli("show", "full")
+    def test_show_full_flag(self):
+        code, out, _ = self.run_cli("show", "--full")
         self.assertEqual(code, 0)
         self.assertIn("unmanaged / system", out)
         self.assertIn("localhost", out)
@@ -135,6 +147,47 @@ class TestCliOther(CliTestCase):
         self.assertIn('"ok": true', out)
 
 
+class TestCliCleanMatch(CliTestCase):
+    def setUp(self):
+        super().setUp()
+        self.run_cli("add", "10.0.0.1", "example.htb")
+        self.run_cli("add", "10.0.0.2", "web01.example.htb")
+        self.run_cli("add", "10.0.0.3", "web02.example.htb")
+        self.run_cli("add", "10.0.0.4", "forest.htb")
+
+    def test_single_match_needs_no_confirmation(self):
+        code, out, _ = self.run_cli("clean", "--match", "forest")
+        self.assertEqual(code, 0)
+        self.assertIn("cleaned 1", out)
+        self.assertEqual(len(self.core.list_entries()), 3)
+
+    def test_match_narrows_like_get(self):
+        self.run_cli("clean", "--match", "example", "web", "--yes")
+        self.assertEqual([e["ip"] for e in self.core.list_entries()], ["10.0.0.1", "10.0.0.4"])
+
+    def test_multiple_matches_refuse_without_a_terminal(self):
+        code, _, err = self.run_cli("clean", "--match", "example")
+        self.assertEqual(code, 2)
+        self.assertIn("pass --yes", err)
+        self.assertIn("will remove 3 entries", err)
+        self.assertEqual(len(self.core.list_entries()), 4)  # nothing touched
+
+    def test_yes_skips_the_prompt(self):
+        code, out, _ = self.run_cli("clean", "--match", "example", "--yes")
+        self.assertEqual(code, 0)
+        self.assertIn("cleaned 3", out)
+
+    def test_json_skips_the_prompt(self):
+        """--json is a machine caller; it must not block on a prompt."""
+        code, out, _ = self.run_cli("clean", "--match", "example", "--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(json.loads(out)["removed"]), 3)
+
+    def test_scopes_are_mutually_exclusive(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("clean", "--tag", "example", "--match", "example")
+
+
 class TestCliSelect(CliTestCase):
     def setUp(self):
         super().setUp()
@@ -146,26 +199,13 @@ class TestCliSelect(CliTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out, "10.10.11.6\n")
 
-    def test_select_is_an_alias_of_get(self):
-        _, out, _ = self.run_cli("select", "forest")
-        self.assertEqual(out, "10.10.11.5\n")
+    def test_select_alias_is_gone(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("select", "forest")
 
     def test_get_host(self):
         _, out, _ = self.run_cli("get", "jobs", "--host")
         self.assertEqual(out, "jobs.example.local\n")
-
-    def test_get_both(self):
-        _, out, _ = self.run_cli("get", "forest", "--both")
-        self.assertEqual(out.split(), ["10.10.11.5", "dc01.forest.htb"])
-
-    def test_show_with_a_pattern_selects(self):
-        code, out, _ = self.run_cli("show", "example")
-        self.assertEqual(code, 0)
-        self.assertEqual(out, "10.10.11.6\n")
-
-    def test_show_without_a_pattern_still_prints_the_overview(self):
-        _, out, _ = self.run_cli("show")
-        self.assertIn("HTB hosts", out)
 
     def test_no_match_exits_1_with_empty_stdout(self):
         code, out, err = self.run_cli("get", "nope")
@@ -184,10 +224,6 @@ class TestCliSelectIndex(CliTestCase):
     def setUp(self):
         super().setUp()
         self.run_cli("add", "10.10.11.6", "a.example.local, b.example.local, c.example.local")
-
-    def test_first(self):
-        code, out, _ = self.run_cli("get", "example", "--host", "--first")
-        self.assertEqual((code, out), (0, "a.example.local\n"))
 
     def test_index(self):
         _, out, _ = self.run_cli("get", "example", "--host", "-i", "2")
@@ -214,17 +250,14 @@ class TestCliSelectIndex(CliTestCase):
         self.assertEqual((code, out), (2, ""))
         self.assertIn("out of range", err)
 
-    def test_index_and_first_are_mutually_exclusive(self):
-        with self.assertRaises(SystemExit):
-            self.run_cli("get", "example", "-i", "2", "--first")
-
     def test_numbered_and_sep_are_mutually_exclusive(self):
         with self.assertRaises(SystemExit):
             self.run_cli("get", "example", "-n", "--sep", ",")
 
-    def test_show_takes_the_same_flags(self):
-        _, out, _ = self.run_cli("show", "example", "--host", "--first")
-        self.assertEqual(out, "a.example.local\n")
+    def test_show_does_not_take_gets_piping_flags(self):
+        """show is for reading; get is for piping. No overlap."""
+        with self.assertRaises(SystemExit):
+            self.run_cli("show", "example", "--host")
 
 
 class TestCliComplete(CliTestCase):
@@ -232,13 +265,15 @@ class TestCliComplete(CliTestCase):
         super().setUp()
         self.run_cli("add", "10.10.11.6", "example.local, jobs.example.local")
 
-    def test_commands_includes_aliases_but_not_complete_itself(self):
+    def test_commands_lists_the_public_surface_only(self):
         code, out, _ = self.run_cli("complete", "commands")
         self.assertEqual(code, 0)
         words = out.split()
         self.assertIn("get", words)
-        self.assertIn("select", words)
-        self.assertNotIn("complete", words)
+        self.assertIn("show", words)
+        self.assertNotIn("complete", words)  # hidden
+        self.assertNotIn("select", words)  # alias removed
+        self.assertNotIn("list", words)  # folded into `show --flat`
 
     def test_hosts_one_per_line(self):
         _, out, _ = self.run_cli("complete", "hosts")

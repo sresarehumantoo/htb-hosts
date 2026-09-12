@@ -49,39 +49,52 @@ def _cmd_rm(args: argparse.Namespace) -> int:
     return 0
 
 
+def _confirm(removed: list[hh.Dict]) -> bool:
+    """Show what a fuzzy `clean --match` is about to remove and ask to proceed.
+
+    The plan and the prompt both go to stderr, so stdout stays clean for the
+    result line even here.
+    """
+    print(f"will remove {len(removed)} entries:", file=sys.stderr)
+    for entry in removed:
+        hosts = " ".join(entry["hostnames"])
+        print(f"  {entry['ip']:<15} {hosts}  [tag={entry['tag']}]", file=sys.stderr)
+    if not sys.stdin.isatty():
+        raise hh.HostsError("refusing to remove a fuzzy match with no terminal to ask; pass --yes")
+    print("proceed? [y/N] ", end="", file=sys.stderr, flush=True)
+    try:
+        return input().strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
 def _cmd_clean(args: argparse.Namespace) -> int:
-    res = hh.clean(args.tag, args.exclude)
+    # A fuzzy --match is the one mode where you cannot tell from the command line
+    # alone what will go, so show the plan first. The other modes are exact.
+    if args.match and not args.yes and not args.json:
+        planned = hh.clean(match=args.match, dry_run=True)["removed"]
+        if len(planned) > 1 and not _confirm(planned):
+            print("aborted", file=sys.stderr)
+            return 1
+    res = hh.clean(args.tag, args.exclude, args.match)
     if args.json:
         print(json.dumps(res))
+        return 0
+    if args.exclude:
+        scope = f"all except ~{', '.join(args.exclude)}"
+    elif args.match:
+        scope = f"~{' '.join(args.match)}"
+    elif args.tag:
+        scope = f"tag={args.tag}"
     else:
-        if args.exclude:
-            scope = f"all except ~{', '.join(args.exclude)}"
-        elif args.tag:
-            scope = f"tag={args.tag}"
-        else:
-            scope = "all managed entries"
-        print(f"cleaned {len(res['removed'])} entry/entries ({scope})")
+        scope = "all managed entries"
+    print(f"cleaned {len(res['removed'])} entry/entries ({scope})")
     return 0
 
 
-def _cmd_list(args: argparse.Namespace) -> int:
-    entries = hh.list_entries(args.tag)
-    if args.json:
-        print(json.dumps(entries))
-    elif not entries:
-        print("(no managed entries)")
-    else:
-        print(f"managed entries ({len(entries)}):")
-        for entry in entries:
-            _print_entry(entry)
-    return 0
-
-
-def _cmd_select(args: argparse.Namespace) -> int:
+def _cmd_get(args: argparse.Namespace) -> int:
     """Print bare ip/hostname values for the matching entries, one per line."""
-    field = "both" if args.both else ("host" if args.host else "ip")
-    index = "1" if args.first else args.index
-    data = hh.select(args.pattern, field, index)
+    data = hh.select(args.pattern, "host" if args.host else "ip", args.index)
     if args.json:
         print(json.dumps(data, indent=2))
         return 0
@@ -99,26 +112,32 @@ def _cmd_select(args: argparse.Namespace) -> int:
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
-    # `show <pattern>` is selection mode; only the bare 'full'/'all' words (or
-    # no argument at all) mean the box-grouped overview.
-    scope = list(args.scope or [])
-    if scope and [w.lower() for w in scope] not in (["full"], ["all"]):
-        args.pattern = scope
-        return _cmd_select(args)
-    full = args.full or bool(scope)
-    data = hh.show_data(full)
+    data = hh.show_data(args.full, args.pattern)
     if args.json:
         print(json.dumps(data, indent=2))
         return 0
+    if args.flat:
+        entries = data["entries"]
+        if not entries:
+            print("(no managed entries)")
+            return 0
+        print(f"managed entries ({len(entries)}):")
+        for entry in entries:
+            _print_entry(entry)
+        return 0
     boxes = "box" if data["box_count"] == 1 else "boxes"
-    entries = "entry" if data["managed_count"] == 1 else "entries"
-    print(f"HTB hosts — {data['managed_count']} managed {entries} in {data['box_count']} {boxes}")
+    entries_word = "entry" if data["managed_count"] == 1 else "entries"
+    scope = f" matching {' '.join(args.pattern)!r}" if args.pattern else ""
+    print(
+        f"HTB hosts — {data['managed_count']} managed {entries_word}"
+        f" in {data['box_count']} {boxes}{scope}"
+    )
     for tag in sorted(data["groups"]):
         group = data["groups"][tag]
         print(f"\n  {tag} ({len(group)})")
         for entry in sorted(group, key=lambda e: e["ip"]):
             print(f"    {entry['ip']:<15} {' '.join(entry['hostnames'])}")
-    if full:
+    if args.full:
         unmanaged = data["unmanaged"]
         print(f"\n  unmanaged / system ({len(unmanaged)}) — outside the managed block")
         for entry in unmanaged:
@@ -201,39 +220,6 @@ def _cmd_doctor(_args: argparse.Namespace) -> int:
 _COMPLETE_KINDS = ("commands",) + hh.COMPLETE_KINDS
 
 
-def _add_select_flags(parser: argparse.ArgumentParser) -> None:
-    """Attach the field selectors plus the which-value/how-to-print controls."""
-    field = parser.add_mutually_exclusive_group()
-    field.add_argument("--ip", action="store_true", help="print IPs only (default)")
-    field.add_argument("--host", action="store_true", help="print hostnames only")
-    field.add_argument("--both", action="store_true", help="print the IP and its hostnames")
-
-    which = parser.add_mutually_exclusive_group()
-    which.add_argument(
-        "-i",
-        "--index",
-        metavar="SPEC",
-        help="keep only these 1-based lines: 2, -1 (last), 2-4, or 1,3",
-    )
-    # Deliberately no "-1" alias: an option that looks like a negative number
-    # makes argparse stop accepting `--index -1` as a value.
-    which.add_argument("--first", action="store_true", help="shorthand for --index 1")
-
-    shape = parser.add_mutually_exclusive_group()
-    shape.add_argument(
-        "-n",
-        "--numbered",
-        action="store_true",
-        help="number the values so you can pick one with --index",
-    )
-    shape.add_argument(
-        "--sep",
-        default="\n",
-        metavar="S",
-        help="join values with S instead of a newline (e.g. --sep , for nmap)",
-    )
-
-
 def _add_entry_parsers(sub: "argparse._SubParsersAction") -> None:
     """Register the commands that change the managed block."""
     p_add = sub.add_parser("add", help="add/update a host entry")
@@ -255,13 +241,31 @@ def _add_entry_parsers(sub: "argparse._SubParsersAction") -> None:
     p_rm.add_argument("--json", action="store_true")
     p_rm.set_defaults(func=_cmd_rm)
 
-    p_clean = sub.add_parser("clean", help="remove managed entries (all, or by --tag/--exclude)")
-    p_clean.add_argument("--tag", help="only remove entries with this exact tag")
-    p_clean.add_argument(
+    p_clean = sub.add_parser(
+        "clean",
+        help="remove managed entries (all, or by --tag/--match/--exclude)",
+        description=(
+            "With no flag, wipe the whole managed block. --tag removes one box by its "
+            "exact tag, --match removes what `get` would show for the same patterns, "
+            "and --exclude is the inverse keep-list."
+        ),
+    )
+    scope = p_clean.add_mutually_exclusive_group()
+    scope.add_argument("--tag", help="only remove entries with this exact tag")
+    scope.add_argument(
+        "--match",
+        nargs="+",
+        metavar="PATTERN",
+        help="remove entries matching every pattern (same selector as `get`)",
+    )
+    scope.add_argument(
         "--exclude",
         action="append",
         metavar="PATTERN",
         help="remove everything EXCEPT fuzzy matches (repeatable), e.g. --exclude forest",
+    )
+    p_clean.add_argument(
+        "-y", "--yes", action="store_true", help="skip the --match confirmation prompt"
     )
     p_clean.add_argument("--json", action="store_true")
     p_clean.set_defaults(func=_cmd_clean)
@@ -269,34 +273,27 @@ def _add_entry_parsers(sub: "argparse._SubParsersAction") -> None:
 
 def _add_query_parsers(sub: "argparse._SubParsersAction") -> None:
     """Register the read-only commands that report or select entries."""
-    p_list = sub.add_parser("list", help="list managed entries")
-    p_list.add_argument("--tag")
-    p_list.add_argument("--json", action="store_true")
-    p_list.set_defaults(func=_cmd_list)
-
     p_show = sub.add_parser(
         "show",
-        help="box-grouped overview, or bare values for a pattern (pipe-friendly)",
+        help="human-readable view of the managed entries, optionally filtered",
         description=(
-            "With no argument, print a box-grouped overview; 'full'/'all' also lists "
-            "unmanaged entries. With any other argument, act like `get`: print just the "
-            "matching values, e.g. nmap $(htb-hosts show example)."
+            "Print the managed entries grouped by box, narrowed to PATTERN if given. "
+            "This is the view for reading; use `get` when you need values to pipe."
         ),
     )
     p_show.add_argument(
-        "scope",
+        "pattern",
         nargs="*",
         metavar="PATTERN",
-        help="'full'/'all' for the wide overview, or a pattern to select entries",
+        help="fuzzy match against ip/tag/hostname (omit for everything)",
     )
-    p_show.add_argument("--full", action="store_true", help="same as the 'full' scope")
-    _add_select_flags(p_show)
+    p_show.add_argument("--flat", action="store_true", help="one line per entry, ungrouped")
+    p_show.add_argument("--full", action="store_true", help="also list unmanaged/system entries")
     p_show.add_argument("--json", action="store_true")
     p_show.set_defaults(func=_cmd_show)
 
     p_get = sub.add_parser(
         "get",
-        aliases=["select"],
         help="print bare ip/hostname values for matching entries (for $(...) piping)",
         description=(
             "Print just the values of the entries matching PATTERN, one per line, so "
@@ -310,9 +307,28 @@ def _add_query_parsers(sub: "argparse._SubParsersAction") -> None:
         metavar="PATTERN",
         help="fuzzy match against ip/tag/hostname (omit for every managed entry)",
     )
-    _add_select_flags(p_get)
+    p_get.add_argument("--host", action="store_true", help="print hostnames instead of IPs")
+    p_get.add_argument(
+        "-i",
+        "--index",
+        metavar="SPEC",
+        help="keep only these 1-based lines: 2, -1 (last), 2-4, or 1,3",
+    )
+    shape = p_get.add_mutually_exclusive_group()
+    shape.add_argument(
+        "-n",
+        "--numbered",
+        action="store_true",
+        help="number the values so you can pick one with --index",
+    )
+    shape.add_argument(
+        "--sep",
+        default="\n",
+        metavar="S",
+        help="join values with S instead of a newline (e.g. --sep , for nmap)",
+    )
     p_get.add_argument("--json", action="store_true")
-    p_get.set_defaults(func=_cmd_select)
+    p_get.set_defaults(func=_cmd_get)
 
 
 def _add_maintenance_parsers(sub: "argparse._SubParsersAction") -> None:
@@ -364,7 +380,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_query_parsers(sub)
     _add_maintenance_parsers(sub)
 
-    # Every namespace carries the completable command names (aliases included,
+    # Every namespace carries the completable command names
     # `complete` itself excluded) so `complete commands` needs no introspection.
     parser.set_defaults(commands=sorted(n for n in sub.choices if n != "complete"))
     return parser

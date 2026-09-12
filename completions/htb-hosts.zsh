@@ -23,7 +23,7 @@ _htb-hosts_scope() {
   for word in ${words[2,CURRENT-1]}; do
     if (( skip )); then
       skip=0
-    elif [[ $word == (-i|--index|--sep) ]]; then
+    elif [[ $word == (-i|--index|--sep|--tag) ]]; then
       skip=1
     elif [[ $word != -* ]]; then
       out+=$word
@@ -32,39 +32,15 @@ _htb-hosts_scope() {
   print -r -- ${out}
 }
 
-# `--host` prints hostnames and `--both` hostnames + IPs, so the pattern should
-# complete to the things that can actually come out.
-_htb-hosts_pattern_kind() {
-  if (( ${+opt_args[--host]} )); then
-    print -r -- hosts
-  elif (( ${+opt_args[--both]} )); then
-    print -r -- selectors
-  else
-    print -r -- targets
-  fi
-}
-
+# `get --host` prints hostnames, so the pattern should complete to the things
+# that can actually come out of the command as typed.
 _htb-hosts_patterns() {
-  local kind=$(_htb-hosts_pattern_kind)
+  local kind=targets
+  (( ${+opt_args[--host]} )) && kind=hosts
   local -a scope
   scope=(${(z)"$(_htb-hosts_scope)"})
   _htb-hosts_words $kind 'hostname, IP or tag' $scope
 }
-
-# The which-value / how-to-print flags shared by `show` and `get`. No hyphen in
-# the name: zsh allows them in function names but not in parameter names, and an
-# invalid assignment is silently reparsed as a command (with a confusing
-# "unknown file attribute" glob error).
-_htb_hosts_select_flags=(
-  '(--host --both)--ip[print IPs only (default)]'
-  '(--ip --both)--host[print hostnames only]'
-  '(--ip --host)--both[print the IP and its hostnames]'
-  '(--first)'{-i,--index}'[keep only these 1-based lines: 2, -1, 2-4, 1,3]:spec:'
-  '(-i --index)--first[shorthand for --index 1]'
-  '(--sep)'{-n,--numbered}'[number the values so you can pick one with --index]'
-  '(-n --numbered)--sep[join values with this instead of a newline]:separator:'
-  '--json[machine-readable output]'
-)
 
 _htb-hosts() {
   local curcontext="$curcontext" state line ret=1
@@ -81,11 +57,9 @@ _htb-hosts() {
       commands=(
         'add:add or update a host entry'
         'rm:remove a host by hostname or IP'
-        'clean:remove managed entries (all, or by --tag/--exclude)'
-        'list:flat list of managed entries'
-        'show:box-grouped overview, or bare values for a pattern'
+        'clean:remove managed entries (all, or by --tag/--match/--exclude)'
+        'show:human-readable view of the managed entries'
         'get:print bare ip/hostname values for matching entries'
-        'select:alias of get'
         'migrate:import existing /etc/hosts entries into the block'
         'retag:recompute all tags from box name'
         'backup:save an explicit snapshot of /etc/hosts'
@@ -110,24 +84,26 @@ _htb-hosts() {
           ;;
         clean)
           _arguments \
-            '(--exclude)--tag[only remove entries with this exact tag]:tag:->tags' \
-            '(--tag)*--exclude[remove everything EXCEPT fuzzy matches]:pattern:->excludes' \
-            '--json[machine-readable output]' && ret=0
-          ;;
-        list)
-          _arguments \
-            '--tag[only list entries with this tag]:tag:->tags' \
+            '(--exclude --match)--tag[only remove entries with this exact tag]:tag:->tags' \
+            '(--tag --exclude)*--match[remove entries matching every pattern]:pattern:->targets' \
+            '(--tag --match)*--exclude[remove everything EXCEPT fuzzy matches]:pattern:->excludes' \
+            {-y,--yes}'[skip the --match confirmation prompt]' \
             '--json[machine-readable output]' && ret=0
           ;;
         show)
           _arguments \
+            '--flat[one line per entry, ungrouped]' \
             '--full[also list unmanaged/system entries]' \
-            $_htb_hosts_select_flags \
-            '*:pattern or full:->showargs' && ret=0
+            '--json[machine-readable output]' \
+            '*:pattern:->targets' && ret=0
           ;;
-        get|select)
+        get)
           _arguments \
-            $_htb_hosts_select_flags \
+            '--host[print hostnames instead of IPs]' \
+            {-i,--index}'[keep only these 1-based lines: 2, -1, 2-4, 1,3]:spec:' \
+            '(--sep)'{-n,--numbered}'[number the values so you can pick one with --index]' \
+            '(-n --numbered)--sep[join values with this instead of a newline]:separator:' \
+            '--json[machine-readable output]' \
             '*:pattern:->targets' && ret=0
           ;;
         backup)
@@ -152,16 +128,6 @@ _htb-hosts() {
         selectors) _htb-hosts_words selectors 'managed hostname or IP' && ret=0 ;;
         excludes)  _htb-hosts_words targets 'hostname, IP or tag' && ret=0 ;;
         targets)   _htb-hosts_patterns && ret=0 ;;
-        showargs)
-          # `show` takes either the literal scope words or a fuzzy pattern.
-          local -a scopes
-          scopes=(
-            'full:also list unmanaged/system entries'
-            'all:also list unmanaged/system entries'
-          )
-          (( CURRENT == 2 )) && { _describe -t scopes 'scope' scopes && ret=0 }
-          _htb-hosts_patterns && ret=0
-          ;;
       esac
       ;;
   esac

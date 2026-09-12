@@ -37,7 +37,7 @@ class TestProtocol(McpTestCase):
         reply = self.mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = {t["name"] for t in reply["result"]["tools"]}
         self.assertLessEqual(
-            {"htb_hosts_add", "htb_hosts_remove", "htb_hosts_list", "htb_hosts_clean"},
+            {"htb_hosts_add", "htb_hosts_remove", "htb_hosts_show", "htb_hosts_clean"},
             names,
         )
 
@@ -61,11 +61,53 @@ class TestTools(McpTestCase):
         self.assertIn("machine.htb", self.text(reply))
         self.assertIn("machine.htb", self.read())
 
-    def test_list(self):
+    def test_tools_list_covers_the_whole_surface(self):
+        reply = self.mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        names = {t["name"] for t in reply["result"]["tools"]}
+        self.assertTrue(
+            {
+                "htb_hosts_retag",
+                "htb_hosts_backup",
+                "htb_hosts_restore",
+                "htb_hosts_list_backups",
+                "htb_hosts_select",
+            }
+            <= names
+        )
+
+
+class TestMcpReads(McpTestCase):
+    def test_show_returns_a_flat_entries_list_too(self):
+        """htb_hosts_list was dropped; show carries the flat array it provided."""
         self.call("htb_hosts_add", {"ip": "10.0.0.1", "hostnames": ["a.htb"], "tag": "one"})
-        reply = self.call("htb_hosts_list", {"tag": "one"})
-        payload = json.loads(self.text(reply))
+        payload = json.loads(self.text(self.call("htb_hosts_show", {})))
         self.assertEqual(payload["entries"][0]["hostnames"], ["a.htb"])
+
+    def test_list_tool_is_gone(self):
+        reply = self.call("htb_hosts_list", {"tag": "one"})
+        self.assertTrue(reply["result"]["isError"])
+
+    def test_show_filters_by_patterns(self):
+        self.call("htb_hosts_add", {"ip": "10.0.0.1", "hostnames": ["a.htb"]})
+        self.call("htb_hosts_add", {"ip": "10.0.0.2", "hostnames": ["b.htb"]})
+        payload = json.loads(self.text(self.call("htb_hosts_show", {"patterns": ["b.htb"]})))
+        self.assertEqual(payload["managed_count"], 1)
+
+    def test_clean_match(self):
+        self.call("htb_hosts_add", {"ip": "10.0.0.1", "hostnames": ["a.forest.htb"]})
+        self.call("htb_hosts_add", {"ip": "10.0.0.2", "hostnames": ["b.sequel.htb"]})
+        self.call("htb_hosts_clean", {"match": ["forest"]})
+        self.assertEqual([e["ip"] for e in self.core.list_entries()], ["10.0.0.2"])
+
+    def test_clean_dry_run_changes_nothing(self):
+        self.call("htb_hosts_add", {"ip": "10.0.0.1", "hostnames": ["a.forest.htb"]})
+        reply = self.call("htb_hosts_clean", {"match": ["forest"], "dry_run": True})
+        self.assertEqual(len(json.loads(self.text(reply))["removed"]), 1)
+        self.assertEqual(len(self.core.list_entries()), 1)  # still there
+
+    def test_clean_rejects_two_scopes(self):
+        reply = self.call("htb_hosts_clean", {"match": ["a"], "exclude": ["b"]})
+        self.assertTrue(reply["result"]["isError"])
 
     def test_remove(self):
         self.call("htb_hosts_add", {"ip": "10.0.0.1", "hostnames": ["a.htb"]})
@@ -105,6 +147,8 @@ class TestTools(McpTestCase):
         self.call("htb_hosts_retag", {})
         self.assertEqual(self.core.list_entries()[0]["tag"], "a")
 
+
+class TestMcpSnapshots(McpTestCase):
     def test_backup_restore_roundtrip(self):
         self.call("htb_hosts_add", {"ip": "10.0.0.1", "hostnames": ["keep.htb"]})
         self.call("htb_hosts_backup", {"label": "cp"})
@@ -153,20 +197,6 @@ class TestTools(McpTestCase):
     def test_select_bad_field_is_a_tool_error(self):
         reply = self.call("htb_hosts_select", {"field": "port"})
         self.assertTrue(reply["result"]["isError"])
-
-    def test_tools_list_has_new_tools(self):
-        reply = self.mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-        names = {t["name"] for t in reply["result"]["tools"]}
-        self.assertTrue(
-            {
-                "htb_hosts_retag",
-                "htb_hosts_backup",
-                "htb_hosts_restore",
-                "htb_hosts_list_backups",
-                "htb_hosts_select",
-            }
-            <= names
-        )
 
 
 if __name__ == "__main__":

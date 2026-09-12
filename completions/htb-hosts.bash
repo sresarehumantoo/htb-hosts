@@ -6,9 +6,6 @@
 # Candidate words come from `htb-hosts complete <kind>`, which prints one word
 # per line and stays silent if /etc/hosts is unreadable.
 
-# The which-value / how-to-print flags shared by `show` and `get`.
-_htb_hosts_select_opts="--ip --host --both -i --index --first -n --numbered --sep --json"
-
 # Fill COMPREPLY from `htb-hosts complete <kind> [scope...]`, filtered by $cur.
 # $2 is extra literal words to offer alongside; $3.. scope the candidates.
 _htb_hosts_words() {
@@ -26,12 +23,10 @@ _htb_hosts_patterns() {
     for word in "${COMP_WORDS[@]:2:COMP_CWORD-2}"; do
         if ((skip)); then
             skip=0
-        elif [[ $word == -i || $word == --index || $word == --sep ]]; then
+        elif [[ $word == -i || $word == --index || $word == --sep || $word == --tag ]]; then
             skip=1
         elif [[ $word == --host ]]; then
             kind=hosts
-        elif [[ $word == --both ]]; then
-            kind=selectors
         elif [[ $word != -* ]]; then
             scope+=("$word")
         fi
@@ -68,6 +63,10 @@ _htb_hosts() {
             _htb_hosts_words targets ""   # --exclude is additive: never scope it
             return
             ;;
+        --match)
+            _htb_hosts_patterns ""
+            return
+            ;;
         --label|-i|--index|--sep)
             return  # free-form text, nothing to suggest
             ;;
@@ -77,10 +76,9 @@ _htb_hosts() {
     case $cmd in
         add)     opts="--tag --json" ;;
         rm)      opts="--json" ;;
-        clean)   opts="--tag --exclude --json" ;;
-        list)    opts="--tag --json" ;;
-        show)    opts="--full $_htb_hosts_select_opts" ;;
-        get|select) opts="$_htb_hosts_select_opts" ;;
+        clean)   opts="--tag --match --exclude -y --yes --json" ;;
+        show)    opts="--flat --full --json" ;;
+        get)     opts="--host -i --index -n --numbered --sep --json" ;;
         backup)  opts="--label --json" ;;
         restore) opts="--list --json" ;;
         *)       opts="--json" ;;
@@ -92,8 +90,7 @@ _htb_hosts() {
     fi
 
     case $cmd in
-        get|select)     _htb_hosts_patterns "" ;;
-        show)           _htb_hosts_patterns "full all" ;;
+        get|show)       _htb_hosts_patterns "" ;;
         add|rm)         _htb_hosts_words selectors "" ;;
         restore)        _htb_hosts_words backups "" ;;
     esac
