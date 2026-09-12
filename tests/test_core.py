@@ -445,6 +445,18 @@ class TestSelect(HostsTestCase):
     def test_ip_is_deduplicated_per_entry(self):
         self.assertEqual(self.core.select(["example", "jobs"])["values"], ["10.10.11.6"])
 
+    def test_extra_patterns_narrow_rather_than_widen(self):
+        """Each pattern is a refinement, so completion can offer a drill-down."""
+        self.assertEqual(self.core.select(["example", "forest"])["values"], [])
+        self.assertEqual(
+            self.core.select(["example", "jobs"], "host")["values"], ["jobs.example.local"]
+        )
+
+    def test_narrowing_applies_to_hostnames_too(self):
+        self.core.add("10.10.11.9", ["www.shop.htb", "api.shop.htb", "api.dev.shop.htb"])
+        values = self.core.select(["shop", "api"], "host")["values"]
+        self.assertEqual(values, ["api.shop.htb", "api.dev.shop.htb"])
+
     def test_host_field_narrows_to_matching_hostnames(self):
         self.assertEqual(self.core.select("jobs", "host")["values"], ["jobs.example.local"])
 
@@ -564,6 +576,28 @@ class TestComplete(HostsTestCase):
     def test_unknown_kind_raises(self):
         with self.assertRaises(self.core.HostsError):
             self.core.complete("nope")
+
+    def test_patterns_scope_the_candidates(self):
+        self.assertEqual(
+            self.core.complete("hosts", ["example"]),
+            ["example.local", "jobs.example.local"],
+        )
+        self.assertEqual(self.core.complete("ips", ["example"]), ["10.10.11.6"])
+
+    def test_scoping_narrows_with_each_pattern(self):
+        self.assertEqual(self.core.complete("hosts", ["example", "jobs"]), ["jobs.example.local"])
+
+    def test_an_already_typed_pattern_is_not_offered_again(self):
+        self.assertNotIn("forest", self.core.complete("targets", ["forest"]))
+
+    def test_scope_matching_nothing_offers_nothing(self):
+        self.assertEqual(self.core.complete("targets", ["nope"]), [])
+
+    def test_clean_exclude_still_matches_any_pattern(self):
+        """`--exclude` is additive, so it must keep using the `any` quantifier."""
+        removed = self.core.clean(exclude=["example", "forest"])["removed"]
+        self.assertEqual(removed, [])
+        self.assertEqual(len(self.core.list_entries()), 2)
 
 
 class TestDoctorMarkers(HostsTestCase):

@@ -146,6 +146,10 @@ smoke: ## Quick end-to-end CLI check against a throwaway hosts file
 			&& (echo "get should fail when nothing matches" && exit 1) || true; \
 		python3 $$PY complete tags | grep -qx sequel \
 			|| (echo "complete tags missing the sequel box" && exit 1); \
+		[ "$$(python3 $$PY complete hosts sequel dc01)" = dc01.sequel.htb ] \
+			|| (echo "complete did not scope to the typed patterns" && exit 1); \
+		[ "$$(python3 $$PY get sequel dc01 --host)" = dc01.sequel.htb ] \
+			|| (echo "a second pattern did not narrow the selection" && exit 1); \
 		python3 $$PY complete commands | grep -qx get \
 			|| (echo "complete commands missing get" && exit 1); \
 		python3 $$PY backup --label smoke; \

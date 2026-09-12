@@ -9,11 +9,34 @@
 # The which-value / how-to-print flags shared by `show` and `get`.
 _htb_hosts_select_opts="--ip --host --both -i --index --first -n --numbered --sep --json"
 
-# Fill COMPREPLY from `htb-hosts complete <kind>`, filtered by the current word.
+# Fill COMPREPLY from `htb-hosts complete <kind> [scope...]`, filtered by $cur.
+# $2 is extra literal words to offer alongside; $3.. scope the candidates.
 _htb_hosts_words() {
-    local words
-    words=$(htb-hosts complete "$1" 2>/dev/null) || return 0
-    mapfile -t COMPREPLY < <(compgen -W "$words $2" -- "$cur")
+    local kind=$1 extra=$2 words
+    shift 2
+    words=$(htb-hosts complete "$kind" "$@" 2>/dev/null) || return 0
+    mapfile -t COMPREPLY < <(compgen -W "$words $extra" -- "$cur")
+}
+
+# Complete a `get`/`show` pattern: scoped to the patterns already typed (a second
+# pattern narrows) and restricted to what the chosen field can actually print.
+_htb_hosts_patterns() {
+    local word kind=targets skip=0
+    local -a scope
+    for word in "${COMP_WORDS[@]:2:COMP_CWORD-2}"; do
+        if ((skip)); then
+            skip=0
+        elif [[ $word == -i || $word == --index || $word == --sep ]]; then
+            skip=1
+        elif [[ $word == --host ]]; then
+            kind=hosts
+        elif [[ $word == --both ]]; then
+            kind=selectors
+        elif [[ $word != -* ]]; then
+            scope+=("$word")
+        fi
+    done
+    _htb_hosts_words "$kind" "$1" "${scope[@]}"
 }
 
 _htb_hosts() {
@@ -31,18 +54,18 @@ _htb_hosts() {
     done
 
     if [[ -z $cmd ]]; then
-        _htb_hosts_words commands
+        _htb_hosts_words commands ""
         return
     fi
 
     # Option values first: they override the positional rules below.
     case $prev in
         --tag)
-            _htb_hosts_words tags
+            _htb_hosts_words tags ""
             return
             ;;
         --exclude)
-            _htb_hosts_words targets
+            _htb_hosts_words targets ""   # --exclude is additive: never scope it
             return
             ;;
         --label|-i|--index|--sep)
@@ -69,10 +92,10 @@ _htb_hosts() {
     fi
 
     case $cmd in
-        get|select)     _htb_hosts_words targets ;;
-        add|rm)         _htb_hosts_words selectors ;;
-        restore)        _htb_hosts_words backups ;;
-        show)           _htb_hosts_words targets "full all" ;;
+        get|select)     _htb_hosts_patterns "" ;;
+        show)           _htb_hosts_patterns "full all" ;;
+        add|rm)         _htb_hosts_words selectors "" ;;
+        restore)        _htb_hosts_words backups "" ;;
     esac
 }
 

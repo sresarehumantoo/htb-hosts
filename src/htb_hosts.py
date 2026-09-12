@@ -420,11 +420,18 @@ def remove(selector: str) -> Dict:
     return {"removed": _transaction(mutate)}
 
 
-def _entry_matches(entry: Entry, patterns: list[str]) -> bool:
-    """Fuzzy match: True if any pattern is a case-insensitive substring of the
-    entry's IP, tag, or any hostname (e.g. 'forest' matches WEB.FOREST.HTB)."""
+def _entry_matches(entry: Entry, patterns: list[str], require_all: bool = False) -> bool:
+    """Fuzzy match against the entry's IP, tag and hostnames, case-insensitively
+    (e.g. 'forest' matches WEB.FOREST.HTB).
+
+    `require_all` picks the quantifier, and the two callers genuinely differ:
+    `clean --exclude` keeps an entry matching *any* pattern (the flag is
+    repeatable and additive), while `select` treats each extra pattern as a
+    refinement, so every one of them has to match.
+    """
     haystack = " ".join([entry.ip, entry.tag or "", *entry.hostnames]).lower()
-    return any(p in haystack for p in patterns)
+    quantifier = all if require_all else any
+    return quantifier(p in haystack for p in patterns)
 
 
 def clean(tag: Optional[str] = None, exclude: Optional[list[str]] = None) -> Dict:
@@ -521,13 +528,13 @@ SELECT_FIELDS = {
 def _selected_hostnames(entry: Entry, patterns: list[str]) -> list[str]:
     """Return the entry hostnames worth emitting for `patterns`.
 
-    Narrow to the hostnames that actually match (so `select jobs` yields only
-    jobs.example.htb), but fall back to all of them when the entry matched by
-    IP or tag instead.
+    Narrow to the hostnames matching every pattern (so `select example jobs`
+    yields only jobs.example.htb), but fall back to all of them when none match
+    — the entry got here on its IP or tag, and those names are the answer.
     """
     if not patterns:
         return list(entry.hostnames)
-    hit = [h for h in entry.hostnames if any(p in h.lower() for p in patterns)]
+    hit = [h for h in entry.hostnames if all(p in h.lower() for p in patterns)]
     return hit or list(entry.hostnames)
 
 
@@ -573,10 +580,12 @@ def select(patterns: Any = None, field: str = "ip", index: Any = None) -> Dict:
     """Pick managed entries by fuzzy pattern and return bare values for piping.
 
     `patterns` is a string or list (comma/space separated); each is matched
-    case-insensitively against an entry's IP, tag and hostnames. `field` chooses
-    what lands in "values": "ip" (default), "host", or "both". Values are
-    deduplicated in first-seen order, so `nmap $(htb-hosts get example)` gets a
-    clean target list.
+    case-insensitively against an entry's IP, tag and hostnames. Several patterns
+    **narrow**: every one has to match, so `get example jobs` drills into the
+    example box rather than adding a second one. `field` chooses what lands in
+    "values": "ip" (default), "host", or "both". Values are deduplicated in
+    first-seen order, so `nmap $(htb-hosts get example)` gets a clean target
+    list.
 
     `index` narrows "values" to the given 1-based line(s) — the answer to a box
     whose several hostnames would otherwise word-split into several arguments
@@ -588,7 +597,7 @@ def select(patterns: Any = None, field: str = "ip", index: Any = None) -> Dict:
         raise HostsError(f"unknown field: {field!r} (use ip, host, or both)")
     pats = [p.lower() for p in parse_tokens(patterns)]
     _, entries, _ = _split(_read())
-    matched = [e for e in entries if not pats or _entry_matches(e, pats)]
+    matched = [e for e in entries if not pats or _entry_matches(e, pats, require_all=True)]
     values: list[str] = []
     for entry in matched:
         if key in ("ip", "both"):
@@ -611,30 +620,38 @@ def select(patterns: Any = None, field: str = "ip", index: Any = None) -> Dict:
 COMPLETE_KINDS = ("hosts", "ips", "tags", "selectors", "targets", "backups")
 
 
-def complete(kind: str) -> list[str]:
+def complete(kind: str, patterns: Any = None) -> list[str]:
     """Return candidate words for shell tab completion.
 
     "hosts"/"ips"/"tags" are the managed hostnames, IPs and tags. "selectors" is
     hostnames + IPs — what `add` and `rm` name an entry by. "targets" adds tags
     on top, which is what a fuzzy pattern (`get`, `clean --exclude`) may match.
-    "backups" is the snapshot names, newest first. Everything is deduplicated;
-    only "backups" keeps a meaningful order, the rest are sorted so the
-    completion menu is stable.
+    "backups" is the snapshot names, newest first.
+
+    `patterns` scopes the result to the entries those patterns already select,
+    using exactly `select`'s narrowing rule — so completing the next word of
+    `get example --host` offers the hostnames inside the example box, and
+    accepting one does what the menu implied. Patterns already typed are dropped
+    from the candidates. Everything is deduplicated; only "backups" keeps a
+    meaningful order, the rest are sorted so the completion menu is stable.
     """
     if kind == "backups":
         return [b["name"] for b in reversed(list_backups())]
     if kind not in COMPLETE_KINDS:
         raise HostsError(f"unknown completion kind: {kind!r} (use {', '.join(COMPLETE_KINDS)})")
+    pats = [p.lower() for p in parse_tokens(patterns)]
     _, entries, _ = _split(_read())
     words: set[str] = set()
     for entry in entries:
+        if pats and not _entry_matches(entry, pats, require_all=True):
+            continue
         if kind in ("hosts", "selectors", "targets"):
-            words.update(entry.hostnames)
+            words.update(_selected_hostnames(entry, pats))
         if kind in ("ips", "selectors", "targets"):
             words.add(entry.ip)
         if kind in ("tags", "targets") and entry.tag:
             words.add(entry.tag)
-    return sorted(words)
+    return sorted(w for w in words if w.lower() not in pats)
 
 
 def _is_infra(line: str) -> bool:

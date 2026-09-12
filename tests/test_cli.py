@@ -248,6 +248,13 @@ class TestCliComplete(CliTestCase):
         _, out, _ = self.run_cli("complete", "tags")
         self.assertEqual(out.strip(), "example")
 
+    def test_trailing_patterns_scope_the_candidates(self):
+        self.run_cli("add", "10.10.11.5", "dc01.forest.htb")
+        _, out, _ = self.run_cli("complete", "hosts", "example")
+        self.assertEqual(out.split(), ["example.local", "jobs.example.local"])
+        _, out, _ = self.run_cli("complete", "hosts", "example", "jobs")
+        self.assertEqual(out.split(), ["jobs.example.local"])
+
     def test_stays_silent_when_the_hosts_file_is_unreadable(self):
         self.core.HOSTS_FILE = os.path.join(self.tmp, "definitely", "missing")
         code, out, err = self.run_cli("complete", "targets")

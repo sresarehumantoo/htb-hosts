@@ -7,10 +7,48 @@
 # file degrades completion instead of spraying errors into the prompt.
 
 _htb-hosts_words() {
-  # $1 = completion kind, $2 = tag/description for the menu
+  # $1 = completion kind, $2 = tag/description, $3... = patterns already typed
+  local kind=$1 descr=$2
+  shift 2
   local -a items
-  items=(${(f)"$(_call_program htb-hosts htb-hosts complete $1 2>/dev/null)"})
-  (( ${#items} )) && _describe -t "$1" "$2" items
+  items=(${(f)"$(_call_program htb-hosts htb-hosts complete $kind "$@" 2>/dev/null)"})
+  (( ${#items} )) && _describe -t "$kind" "$descr" items
+}
+
+# The pattern words typed so far, with options and their values removed. They
+# scope the candidates, because a second pattern narrows the selection.
+_htb-hosts_scope() {
+  local word skip=0
+  local -a out
+  for word in ${words[2,CURRENT-1]}; do
+    if (( skip )); then
+      skip=0
+    elif [[ $word == (-i|--index|--sep) ]]; then
+      skip=1
+    elif [[ $word != -* ]]; then
+      out+=$word
+    fi
+  done
+  print -r -- ${out}
+}
+
+# `--host` prints hostnames and `--both` hostnames + IPs, so the pattern should
+# complete to the things that can actually come out.
+_htb-hosts_pattern_kind() {
+  if (( ${+opt_args[--host]} )); then
+    print -r -- hosts
+  elif (( ${+opt_args[--both]} )); then
+    print -r -- selectors
+  else
+    print -r -- targets
+  fi
+}
+
+_htb-hosts_patterns() {
+  local kind=$(_htb-hosts_pattern_kind)
+  local -a scope
+  scope=(${(z)"$(_htb-hosts_scope)"})
+  _htb-hosts_words $kind 'hostname, IP or tag' $scope
 }
 
 # The which-value / how-to-print flags shared by `show` and `get`. No hyphen in
@@ -73,7 +111,7 @@ _htb-hosts() {
         clean)
           _arguments \
             '(--exclude)--tag[only remove entries with this exact tag]:tag:->tags' \
-            '(--tag)*--exclude[remove everything EXCEPT fuzzy matches]:pattern:->targets' \
+            '(--tag)*--exclude[remove everything EXCEPT fuzzy matches]:pattern:->excludes' \
             '--json[machine-readable output]' && ret=0
           ;;
         list)
@@ -112,7 +150,8 @@ _htb-hosts() {
         tags)      _htb-hosts_words tags 'box tag' && ret=0 ;;
         backups)   _htb-hosts_words backups 'snapshot' && ret=0 ;;
         selectors) _htb-hosts_words selectors 'managed hostname or IP' && ret=0 ;;
-        targets)   _htb-hosts_words targets 'hostname, IP or tag' && ret=0 ;;
+        excludes)  _htb-hosts_words targets 'hostname, IP or tag' && ret=0 ;;
+        targets)   _htb-hosts_patterns && ret=0 ;;
         showargs)
           # `show` takes either the literal scope words or a fuzzy pattern.
           local -a scopes
@@ -121,7 +160,7 @@ _htb-hosts() {
             'all:also list unmanaged/system entries'
           )
           (( CURRENT == 2 )) && { _describe -t scopes 'scope' scopes && ret=0 }
-          _htb-hosts_words targets 'hostname, IP or tag' && ret=0
+          _htb-hosts_patterns && ret=0
           ;;
       esac
       ;;

@@ -183,7 +183,7 @@ def _cmd_complete(args: argparse.Namespace) -> int:
         if args.kind == "commands":
             words = args.commands
         else:
-            words = hh.complete(args.kind)
+            words = hh.complete(args.kind, args.scope)
     except (OSError, ValueError, hh.HostsError):
         return 0
     if words:
@@ -343,6 +343,12 @@ def _add_maintenance_parsers(sub: "argparse._SubParsersAction") -> None:
     # literal "==SUPPRESS==" row for help=SUPPRESS on a subparser).
     p_complete = sub.add_parser("complete")
     p_complete.add_argument("kind", choices=_COMPLETE_KINDS)
+    p_complete.add_argument(
+        "scope",
+        nargs="*",
+        metavar="PATTERN",
+        help="patterns already typed, to scope the candidates to that selection",
+    )
     p_complete.set_defaults(func=_cmd_complete)
 
 

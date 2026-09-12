@@ -149,10 +149,26 @@ htb-hosts get                                      # every managed IP
 ```
 
 The pattern is matched case-insensitively against each entry's IP, tag, and
-hostnames — the same fuzzy rule `clean --exclude` uses. `--ip` (the default),
-`--host`, and `--both` choose what gets printed; with `--host`, the output narrows
-to the hostnames that actually matched (`get jobs --host` → `jobs.example.htb`),
-falling back to all of the entry's names when the match came from its IP or tag.
+hostnames. `--ip` (the default), `--host`, and `--both` choose what gets printed;
+with `--host`, the output narrows to the hostnames that actually matched
+(`get jobs --host` → `jobs.example.htb`), falling back to all of the entry's names
+when the match came from its IP or tag.
+
+**Several patterns narrow, they don't add.** Each one has to match, so patterns
+drill into a selection rather than growing it:
+
+```console
+$ htb-hosts get forest --host          # the whole box
+forest.htb
+dc01.forest.htb
+www.forest.htb
+
+$ htb-hosts get forest dc01 --host     # drill in
+dc01.forest.htb
+```
+
+(`clean --exclude` is the opposite and deliberately so: it is a repeatable,
+additive keep-list, where `--exclude forest --exclude sequel` keeps both.)
 
 Nothing matched is an error: stdout stays empty and the exit code is `1`, so a
 typo can't silently hand an empty target list to the next command.
@@ -201,12 +217,18 @@ now, not a static list.
 | `htb-hosts <TAB>` | subcommands, with descriptions |
 | `htb-hosts rm <TAB>` | your managed hostnames and IPs |
 | `htb-hosts get <TAB>` | hostnames, IPs **and** tags (anything a pattern matches) |
+| `htb-hosts get forest --host <TAB>` | only the hostnames **inside** the forest box |
 | `htb-hosts clean --tag <TAB>` | your box tags |
 | `htb-hosts restore <TAB>` | your snapshots, newest first |
 | `htb-hosts add … --<TAB>` | that subcommand's flags |
 
-The scripts get their data from `htb-hosts complete <kind>`, a hidden subcommand
-that prints one candidate per line. It is deliberately silent on failure — an
+Completion is also **scoped and field-aware**: once you have typed a pattern, the
+next one completes only from what that selection contains, and `--host`/`--both`
+restrict the menu to values that field can actually print. Accepting a suggestion
+therefore always does what the menu implied — which is why patterns narrow.
+
+The scripts get their data from `htb-hosts complete <kind> [pattern…]`, a hidden
+subcommand that prints one candidate per line. It is deliberately silent on failure — an
 unreadable or malformed `/etc/hosts` degrades completion rather than spraying
 errors into your prompt.
 
