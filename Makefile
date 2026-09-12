@@ -110,6 +110,12 @@ smoke: ## Quick end-to-end CLI check against a throwaway hosts file
 		PY=src/htb-hosts; \
 		python3 $$PY add machine.htb 10.129.45.2 www.machine.htb; \
 		python3 $$PY add 10.129.223.2 "sequel.htb, dc01.sequel.htb"; \
+		[ "$$(python3 $$PY get sequel)" = 10.129.223.2 ] \
+			|| (echo "get did not return the bare IP" && exit 1); \
+		[ "$$(python3 $$PY show dc01 --host)" = dc01.sequel.htb ] \
+			|| (echo "show <pattern> did not select the hostname" && exit 1); \
+		python3 $$PY get nosuchbox >/dev/null 2>&1 \
+			&& (echo "get should fail when nothing matches" && exit 1) || true; \
 		python3 $$PY backup --label smoke; \
 		python3 $$PY list; \
 		python3 $$PY clean --exclude sequel; \

@@ -134,6 +134,51 @@ class TestCliOther(CliTestCase):
         self.assertIn('"ok": true', out)
 
 
+class TestCliSelect(CliTestCase):
+    def setUp(self):
+        super().setUp()
+        self.run_cli("add", "10.10.11.6", "example.local, jobs.example.local")
+        self.run_cli("add", "10.10.11.5", "dc01.forest.htb")
+
+    def test_get_prints_only_the_ip(self):
+        code, out, _ = self.run_cli("get", "example")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "10.10.11.6\n")
+
+    def test_select_is_an_alias_of_get(self):
+        _, out, _ = self.run_cli("select", "forest")
+        self.assertEqual(out, "10.10.11.5\n")
+
+    def test_get_host(self):
+        _, out, _ = self.run_cli("get", "jobs", "--host")
+        self.assertEqual(out, "jobs.example.local\n")
+
+    def test_get_both(self):
+        _, out, _ = self.run_cli("get", "forest", "--both")
+        self.assertEqual(out.split(), ["10.10.11.5", "dc01.forest.htb"])
+
+    def test_show_with_a_pattern_selects(self):
+        code, out, _ = self.run_cli("show", "example")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "10.10.11.6\n")
+
+    def test_show_without_a_pattern_still_prints_the_overview(self):
+        _, out, _ = self.run_cli("show")
+        self.assertIn("HTB hosts", out)
+
+    def test_no_match_exits_1_with_empty_stdout(self):
+        code, out, err = self.run_cli("get", "nope")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("no managed entry", err)
+
+    def test_get_json(self):
+        _, out, _ = self.run_cli("get", "example", "--json")
+        payload = json.loads(out)
+        self.assertEqual(payload["field"], "ip")
+        self.assertEqual(payload["values"], ["10.10.11.6"])
+
+
 class TestCliBackup(CliTestCase):
     def test_backup_and_restore(self):
         self.run_cli("add", "10.0.0.1", "keep.htb")

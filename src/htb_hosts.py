@@ -506,6 +506,62 @@ def show_data(full: bool = False) -> Dict:
     return data
 
 
+SELECT_FIELDS = {
+    "ip": "ip",
+    "ips": "ip",
+    "host": "host",
+    "hosts": "host",
+    "hostname": "host",
+    "hostnames": "host",
+    "both": "both",
+    "all": "both",
+}
+
+
+def _selected_hostnames(entry: Entry, patterns: list[str]) -> list[str]:
+    """Return the entry hostnames worth emitting for `patterns`.
+
+    Narrow to the hostnames that actually match (so `select jobs` yields only
+    jobs.example.htb), but fall back to all of them when the entry matched by
+    IP or tag instead.
+    """
+    if not patterns:
+        return list(entry.hostnames)
+    hit = [h for h in entry.hostnames if any(p in h.lower() for p in patterns)]
+    return hit or list(entry.hostnames)
+
+
+def select(patterns: Any = None, field: str = "ip") -> Dict:
+    """Pick managed entries by fuzzy pattern and return bare values for piping.
+
+    `patterns` is a string or list (comma/space separated); each is matched
+    case-insensitively against an entry's IP, tag and hostnames. `field` chooses
+    what lands in "values": "ip" (default), "host", or "both". Values are
+    deduplicated in first-seen order, so `nmap $(htb-hosts get example)` gets a
+    clean target list. No match is not an error here — "values" is just empty.
+    """
+    key = SELECT_FIELDS.get((field or "ip").strip().lower())
+    if key is None:
+        raise HostsError(f"unknown field: {field!r} (use ip, host, or both)")
+    pats = [p.lower() for p in parse_tokens(patterns)]
+    _, entries, _ = _split(_read())
+    matched = [e for e in entries if not pats or _entry_matches(e, pats)]
+    values: list[str] = []
+    for entry in matched:
+        if key in ("ip", "both"):
+            values.append(entry.ip)
+        if key in ("host", "both"):
+            values.extend(_selected_hostnames(entry, pats))
+    seen: set[str] = set()
+    unique = [v for v in values if not (v in seen or seen.add(v))]
+    return {
+        "patterns": pats,
+        "field": key,
+        "entries": [e.to_dict() for e in matched],
+        "values": unique,
+    }
+
+
 def _is_infra(line: str) -> bool:
     """True for lines that must stay outside the managed block on migrate."""
     stripped = line.strip()

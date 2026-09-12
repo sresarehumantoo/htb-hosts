@@ -433,6 +433,45 @@ class TestParseTokens(HostsTestCase):
         self.assertEqual(hosts, ["a.htb", "b.htb"])
 
 
+class TestSelect(HostsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.core.add("10.10.11.6", ["example.local", "jobs.example.local"])
+        self.core.add("10.10.11.5", ["dc01.forest.htb"])
+
+    def test_ip_is_the_default_field(self):
+        self.assertEqual(self.core.select("example")["values"], ["10.10.11.6"])
+
+    def test_ip_is_deduplicated_per_entry(self):
+        self.assertEqual(self.core.select(["example", "jobs"])["values"], ["10.10.11.6"])
+
+    def test_host_field_narrows_to_matching_hostnames(self):
+        self.assertEqual(self.core.select("jobs", "host")["values"], ["jobs.example.local"])
+
+    def test_host_field_falls_back_to_all_names_when_matched_by_ip(self):
+        values = self.core.select("10.10.11.6", "host")["values"]
+        self.assertEqual(values, ["example.local", "jobs.example.local"])
+
+    def test_both_field(self):
+        values = self.core.select("forest", "both")["values"]
+        self.assertEqual(values, ["10.10.11.5", "dc01.forest.htb"])
+
+    def test_matches_by_tag_case_insensitively(self):
+        self.assertEqual(self.core.select("FOREST")["values"], ["10.10.11.5"])
+
+    def test_no_pattern_returns_everything(self):
+        self.assertEqual(self.core.select()["values"], ["10.10.11.6", "10.10.11.5"])
+
+    def test_no_match_is_empty_not_an_error(self):
+        data = self.core.select("nothing-here")
+        self.assertEqual(data["values"], [])
+        self.assertEqual(data["entries"], [])
+
+    def test_unknown_field_raises(self):
+        with self.assertRaises(self.core.HostsError):
+            self.core.select("example", "port")
+
+
 class TestDoctorMarkers(HostsTestCase):
     def test_doctor_ok_with_intact_block(self):
         self.core.add("10.0.0.1", ["a.htb"])

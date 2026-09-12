@@ -30,6 +30,9 @@ HTB hosts — 5 managed entries in 3 boxes
   sequel (2)
     10.10.11.202    sequel.htb dc01.sequel.htb
 
+$ nmap -p- $(htb-hosts get forest)      # resolve a box name to its IP, inline
+Starting Nmap 7.95 ( https://nmap.org ) ...
+
 $ htb-hosts clean --exclude forest      # done with everything but forest
 cleaned 3 entry/entries (all except ~forest)
 ```
@@ -41,6 +44,9 @@ cleaned 3 entry/entries (all except ~forest)
 - 🧹 **One-shot cleanup** — everything lives in a managed block. `clean` wipes it;
   `clean --tag forest` drops one box; `clean --exclude forest` keeps one and clears
   the rest.
+- 🔎 **Pipe-friendly lookups** — `htb-hosts get forest` prints just the IP, so
+  `nmap $(htb-hosts get forest)` and `ffuf -u http://$(htb-hosts get forest --host)`
+  just work.
 - 🏷️ **Automatic per-box tagging** — hostnames are grouped by box name
   (`dc01.forest.htb` → `forest`), even across multiple IPs.
 - 🧰 **Safe by construction** — strict input validation (no injection), `flock`
@@ -89,6 +95,8 @@ htb-hosts add 10.10.11.161 "forest.htb, dc01.forest.htb"  # ...or one quoted str
 htb-hosts add www.forest.htb 10.10.11.161 --tag forest  # extra vhost, same box
 htb-hosts show                                          # box-grouped overview
 htb-hosts show full                                     # also show unmanaged/system lines
+htb-hosts get forest                                    # just the IP, for $(...)
+htb-hosts get forest --host                             # just the hostnames
 htb-hosts list                                          # flat list of managed entries
 htb-hosts rm forest.htb                                 # remove one hostname
 htb-hosts clean --tag forest                            # remove a whole box
@@ -108,6 +116,7 @@ spaces. Add `--json` to most commands for machine-readable output.
 | `add <ip> <host…>` | Add/update an entry (idempotent; merges by IP) |
 | `rm <host\|ip>` | Remove a hostname or a whole IP from the block |
 | `show [full]` | Pretty, box-grouped overview (`full` adds unmanaged lines) |
+| `show <pattern>` / `get <pattern>` | Bare values for matching entries, for `$(…)` |
 | `list [--tag T]` | Flat list of managed entries |
 | `clean [--tag T \| --exclude P…]` | Remove all, one box, or all-but-matches |
 | `retag` | Re-derive every tag from its box name |
@@ -115,6 +124,29 @@ spaces. Add `--json` to most commands for machine-readable output.
 | `restore [--list] [name]` | Roll back to a snapshot |
 | `migrate` | Import existing `/etc/hosts` entries into the block |
 | `doctor` | Check access + managed-block integrity; print the exact fix |
+
+### Selecting values for other tools
+
+`get` (alias `select`) prints nothing but the values of the entries matching a
+fuzzy pattern — one per line, deduplicated — so they drop straight into another
+command. `show <pattern>` is the same thing, for when `show` is already in your
+fingers:
+
+```bash
+nmap -p- $(htb-hosts get forest)                   # -> 10.10.11.161
+ffuf -u "http://$(htb-hosts get forest --host)/FUZZ" -w words.txt
+htb-hosts get forest --both                        # IP and every hostname
+htb-hosts get                                      # every managed IP
+```
+
+The pattern is matched case-insensitively against each entry's IP, tag, and
+hostnames — the same fuzzy rule `clean --exclude` uses. `--ip` (the default),
+`--host`, and `--both` choose what gets printed; with `--host`, the output narrows
+to the hostnames that actually matched (`get jobs --host` → `jobs.example.htb`),
+falling back to all of the entry's names when the match came from its IP or tag.
+
+Nothing matched is an error: stdout stays empty and the exit code is `1`, so a
+typo can't silently hand an empty target list to the next command.
 
 ### Tagging
 
@@ -163,8 +195,8 @@ claude mcp add -s user htb-hosts -- python3 /opt/htb-hosts/mcp_server.py
 <summary>Tools exposed (server name <code>htb-hosts</code>)</summary>
 
 `htb_hosts_add`, `htb_hosts_remove`, `htb_hosts_list`, `htb_hosts_show`,
-`htb_hosts_clean` (accepts `exclude`), `htb_hosts_retag`, `htb_hosts_backup`,
-`htb_hosts_restore`, `htb_hosts_list_backups`.
+`htb_hosts_select`, `htb_hosts_clean` (accepts `exclude`), `htb_hosts_retag`,
+`htb_hosts_backup`, `htb_hosts_restore`, `htb_hosts_list_backups`.
 </details>
 
 ## How it works

@@ -77,8 +77,29 @@ def _cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_select(args: argparse.Namespace) -> int:
+    """Print bare ip/hostname values for the matching entries, one per line."""
+    field = "both" if args.both else ("host" if args.host else "ip")
+    data = hh.select(args.pattern, field)
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+    if not data["values"]:
+        print(f"error: no managed entry matches {' '.join(args.pattern)!r}", file=sys.stderr)
+        return 1
+    for value in data["values"]:
+        print(value)
+    return 0
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
-    full = args.full or args.scope in ("full", "all")
+    # `show <pattern>` is selection mode; only the bare 'full'/'all' words (or
+    # no argument at all) mean the box-grouped overview.
+    scope = list(args.scope or [])
+    if scope and [w.lower() for w in scope] not in (["full"], ["all"]):
+        args.pattern = scope
+        return _cmd_select(args)
+    full = args.full or bool(scope)
     data = hh.show_data(full)
     if args.json:
         print(json.dumps(data, indent=2))
@@ -152,6 +173,14 @@ def _cmd_doctor(_args: argparse.Namespace) -> int:
     return 0 if info["ok"] else 1
 
 
+def _add_select_flags(parser: argparse.ArgumentParser) -> None:
+    """Attach the mutually exclusive --ip/--host/--both field selectors."""
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--ip", action="store_true", help="print IPs only (default)")
+    group.add_argument("--host", action="store_true", help="print hostnames only")
+    group.add_argument("--both", action="store_true", help="print the IP and its hostnames")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
@@ -195,16 +224,45 @@ def _build_parser() -> argparse.ArgumentParser:
     p_list.add_argument("--json", action="store_true")
     p_list.set_defaults(func=_cmd_list)
 
-    p_show = sub.add_parser("show", help="pretty, box-grouped overview of managed hosts")
+    p_show = sub.add_parser(
+        "show",
+        help="box-grouped overview, or bare values for a pattern (pipe-friendly)",
+        description=(
+            "With no argument, print a box-grouped overview; 'full'/'all' also lists "
+            "unmanaged entries. With any other argument, act like `get`: print just the "
+            "matching values, e.g. nmap $(htb-hosts show example)."
+        ),
+    )
     p_show.add_argument(
         "scope",
-        nargs="?",
-        choices=["full", "all"],
-        help="'full' (or 'all') also lists unmanaged/system entries",
+        nargs="*",
+        metavar="PATTERN",
+        help="'full'/'all' for the wide overview, or a pattern to select entries",
     )
     p_show.add_argument("--full", action="store_true", help="same as the 'full' scope")
+    _add_select_flags(p_show)
     p_show.add_argument("--json", action="store_true")
     p_show.set_defaults(func=_cmd_show)
+
+    p_get = sub.add_parser(
+        "get",
+        aliases=["select"],
+        help="print bare ip/hostname values for matching entries (for $(...) piping)",
+        description=(
+            "Print just the values of the entries matching PATTERN, one per line, so "
+            "they can be piped straight into other tools: nmap $(htb-hosts get example), "
+            "ffuf -u http://$(htb-hosts get example --host)/FUZZ"
+        ),
+    )
+    p_get.add_argument(
+        "pattern",
+        nargs="*",
+        metavar="PATTERN",
+        help="fuzzy match against ip/tag/hostname (omit for every managed entry)",
+    )
+    _add_select_flags(p_get)
+    p_get.add_argument("--json", action="store_true")
+    p_get.set_defaults(func=_cmd_select)
 
     p_migrate = sub.add_parser("migrate", help="one-time import of existing entries into the block")
     p_migrate.set_defaults(func=_cmd_migrate)

@@ -125,6 +125,20 @@ class TestTools(McpTestCase):
         )
         self.assertEqual(len(self.core.list_entries()[0]["hostnames"]), 2)
 
+    def test_select(self):
+        self.call("htb_hosts_add", {"ip": "10.10.11.6", "hostnames": ["example.local"]})
+        reply = self.call("htb_hosts_select", {"patterns": ["example"]})
+        self.assertEqual(json.loads(self.text(reply))["values"], ["10.10.11.6"])
+
+    def test_select_host_field(self):
+        self.call("htb_hosts_add", {"ip": "10.10.11.6", "hostnames": ["example.local"]})
+        reply = self.call("htb_hosts_select", {"patterns": ["example"], "field": "host"})
+        self.assertEqual(json.loads(self.text(reply))["values"], ["example.local"])
+
+    def test_select_bad_field_is_a_tool_error(self):
+        reply = self.call("htb_hosts_select", {"field": "port"})
+        self.assertTrue(reply["result"]["isError"])
+
     def test_tools_list_has_new_tools(self):
         reply = self.mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = {t["name"] for t in reply["result"]["tools"]}
@@ -134,6 +148,7 @@ class TestTools(McpTestCase):
                 "htb_hosts_backup",
                 "htb_hosts_restore",
                 "htb_hosts_list_backups",
+                "htb_hosts_select",
             }
             <= names
         )

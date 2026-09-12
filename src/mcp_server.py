@@ -103,6 +103,30 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "htb_hosts_select",
+        "description": (
+            "Look up managed entries by fuzzy pattern and return just their bare "
+            "values, ready to feed into another command. `patterns` matches against "
+            "ip/tag/hostname; `field` picks what comes back: 'ip' (default), 'host', "
+            "or 'both'. Use this to resolve a box name to its IP before scanning."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "patterns": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Fuzzy patterns, e.g. ['machine']; omit to match everything",
+                },
+                "field": {
+                    "type": "string",
+                    "enum": ["ip", "host", "both"],
+                    "description": "Which values to return (default 'ip')",
+                },
+            },
+        },
+    },
+    {
         "name": "htb_hosts_retag",
         "description": "Recompute every entry's tag from its box name (fixes bulk tag=imported).",
         "inputSchema": {"type": "object", "properties": {}},
@@ -142,6 +166,7 @@ def _call_tool(name: str, args: dict[str, Any]) -> hh.Dict:
         "htb_hosts_remove": lambda: hh.remove(args["selector"]),
         "htb_hosts_list": lambda: {"entries": hh.list_entries(args.get("tag"))},
         "htb_hosts_show": lambda: hh.show_data(bool(args.get("full"))),
+        "htb_hosts_select": lambda: hh.select(args.get("patterns"), args.get("field") or "ip"),
         "htb_hosts_clean": lambda: hh.clean(args.get("tag"), args.get("exclude")),
         "htb_hosts_retag": hh.retag,
         "htb_hosts_backup": lambda: hh.backup(args.get("label")),
