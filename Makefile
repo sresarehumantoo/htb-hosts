@@ -134,6 +134,14 @@ smoke: ## Quick end-to-end CLI check against a throwaway hosts file
 			|| (echo "get did not return the bare IP" && exit 1); \
 		[ "$$(python3 $$PY show dc01 --host)" = dc01.sequel.htb ] \
 			|| (echo "show <pattern> did not select the hostname" && exit 1); \
+		[ "$$(python3 $$PY get sequel --host --first)" = sequel.htb ] \
+			|| (echo "--first did not pick the first of two hostnames" && exit 1); \
+		[ "$$(python3 $$PY get sequel --host -i -1)" = dc01.sequel.htb ] \
+			|| (echo "--index -1 did not pick the last hostname" && exit 1); \
+		[ "$$(python3 $$PY get sequel --host --sep ,)" = sequel.htb,dc01.sequel.htb ] \
+			|| (echo "--sep did not join onto one line" && exit 1); \
+		python3 $$PY get sequel --host -i 9 >/dev/null 2>&1 \
+			&& (echo "an out-of-range index should fail" && exit 1) || true; \
 		python3 $$PY get nosuchbox >/dev/null 2>&1 \
 			&& (echo "get should fail when nothing matches" && exit 1) || true; \
 		python3 $$PY complete tags | grep -qx sequel \

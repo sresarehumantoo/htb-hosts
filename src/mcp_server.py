@@ -123,6 +123,14 @@ TOOLS: list[dict[str, Any]] = [
                     "enum": ["ip", "host", "both"],
                     "description": "Which values to return (default 'ip')",
                 },
+                "index": {
+                    "type": ["string", "integer"],
+                    "description": (
+                        "Keep only these 1-based values when a box has several "
+                        "(a hostname per vhost): 2, -1 for the last, the range '2-4', "
+                        "or the list '1,3'. Omit to return them all."
+                    ),
+                },
             },
         },
     },
@@ -166,7 +174,9 @@ def _call_tool(name: str, args: dict[str, Any]) -> hh.Dict:
         "htb_hosts_remove": lambda: hh.remove(args["selector"]),
         "htb_hosts_list": lambda: {"entries": hh.list_entries(args.get("tag"))},
         "htb_hosts_show": lambda: hh.show_data(bool(args.get("full"))),
-        "htb_hosts_select": lambda: hh.select(args.get("patterns"), args.get("field") or "ip"),
+        "htb_hosts_select": lambda: hh.select(
+            args.get("patterns"), args.get("field") or "ip", args.get("index")
+        ),
         "htb_hosts_clean": lambda: hh.clean(args.get("tag"), args.get("exclude")),
         "htb_hosts_retag": hh.retag,
         "htb_hosts_backup": lambda: hh.backup(args.get("label")),

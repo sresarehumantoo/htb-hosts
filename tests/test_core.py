@@ -472,6 +472,52 @@ class TestSelect(HostsTestCase):
             self.core.select("example", "port")
 
 
+class TestSelectIndex(HostsTestCase):
+    """A box with several vhosts must not word-split into several arguments."""
+
+    def setUp(self):
+        super().setUp()
+        self.core.add("10.10.11.6", ["a.example.local", "b.example.local", "c.example.local"])
+
+    def values(self, index):
+        return self.core.select("example", "host", index)["values"]
+
+    def test_without_an_index_every_hostname_comes_back(self):
+        self.assertEqual(len(self.values(None)), 3)
+
+    def test_single_index_is_one_based(self):
+        self.assertEqual(self.values("1"), ["a.example.local"])
+        self.assertEqual(self.values(2), ["b.example.local"])
+
+    def test_negative_index_counts_from_the_end(self):
+        self.assertEqual(self.values("-1"), ["c.example.local"])
+        self.assertEqual(self.values("-3"), ["a.example.local"])
+
+    def test_range(self):
+        self.assertEqual(self.values("2-3"), ["b.example.local", "c.example.local"])
+
+    def test_list_keeps_the_order_asked_for_and_dedupes(self):
+        self.assertEqual(self.values("3,1,3"), ["c.example.local", "a.example.local"])
+
+    def test_out_of_range_raises_rather_than_silently_dropping(self):
+        for spec in ("4", "-4", "0", "1-4"):
+            with self.subTest(spec=spec), self.assertRaises(self.core.HostsError):
+                self.values(spec)
+
+    def test_malformed_spec_raises(self):
+        for spec in ("abc", "1-", "2-1", "-1-2", "1.5"):
+            with self.subTest(spec=spec), self.assertRaises(self.core.HostsError):
+                self.values(spec)
+
+    def test_index_is_not_applied_to_an_empty_match(self):
+        data = self.core.select("nothing-here", "host", "1")
+        self.assertEqual(data["values"], [])
+
+    def test_resolve_index_returns_zero_based_positions(self):
+        self.assertEqual(self.core.resolve_index("1,3", 3), [0, 2])
+        self.assertEqual(self.core.resolve_index("-1", 3), [2])
+
+
 class TestComplete(HostsTestCase):
     def setUp(self):
         super().setUp()

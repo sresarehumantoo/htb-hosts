@@ -6,6 +6,9 @@
 # Candidate words come from `htb-hosts complete <kind>`, which prints one word
 # per line and stays silent if /etc/hosts is unreadable.
 
+# The which-value / how-to-print flags shared by `show` and `get`.
+_htb_hosts_select_opts="--ip --host --both -i --index --first -n --numbered --sep --json"
+
 # Fill COMPREPLY from `htb-hosts complete <kind>`, filtered by the current word.
 _htb_hosts_words() {
     local words
@@ -42,7 +45,7 @@ _htb_hosts() {
             _htb_hosts_words targets
             return
             ;;
-        --label)
+        --label|-i|--index|--sep)
             return  # free-form text, nothing to suggest
             ;;
     esac
@@ -53,8 +56,8 @@ _htb_hosts() {
         rm)      opts="--json" ;;
         clean)   opts="--tag --exclude --json" ;;
         list)    opts="--tag --json" ;;
-        show)    opts="--full --ip --host --both --json" ;;
-        get|select) opts="--ip --host --both --json" ;;
+        show)    opts="--full $_htb_hosts_select_opts" ;;
+        get|select) opts="$_htb_hosts_select_opts" ;;
         backup)  opts="--label --json" ;;
         restore) opts="--list --json" ;;
         *)       opts="--json" ;;

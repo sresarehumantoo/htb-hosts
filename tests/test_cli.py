@@ -180,6 +180,53 @@ class TestCliSelect(CliTestCase):
         self.assertEqual(payload["values"], ["10.10.11.6"])
 
 
+class TestCliSelectIndex(CliTestCase):
+    def setUp(self):
+        super().setUp()
+        self.run_cli("add", "10.10.11.6", "a.example.local, b.example.local, c.example.local")
+
+    def test_first(self):
+        code, out, _ = self.run_cli("get", "example", "--host", "--first")
+        self.assertEqual((code, out), (0, "a.example.local\n"))
+
+    def test_index(self):
+        _, out, _ = self.run_cli("get", "example", "--host", "-i", "2")
+        self.assertEqual(out, "b.example.local\n")
+
+    def test_negative_index_is_not_mistaken_for_a_flag(self):
+        _, out, _ = self.run_cli("get", "example", "--host", "-i", "-1")
+        self.assertEqual(out, "c.example.local\n")
+
+    def test_range(self):
+        _, out, _ = self.run_cli("get", "example", "--host", "-i", "1-2")
+        self.assertEqual(out, "a.example.local\nb.example.local\n")
+
+    def test_sep_joins_onto_one_line(self):
+        _, out, _ = self.run_cli("get", "example", "--host", "--sep", ",")
+        self.assertEqual(out, "a.example.local,b.example.local,c.example.local\n")
+
+    def test_numbered(self):
+        _, out, _ = self.run_cli("get", "example", "--host", "-n")
+        self.assertEqual(out.splitlines()[0], "1  a.example.local")
+
+    def test_out_of_range_exits_2_with_empty_stdout(self):
+        code, out, err = self.run_cli("get", "example", "--host", "-i", "9")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("out of range", err)
+
+    def test_index_and_first_are_mutually_exclusive(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("get", "example", "-i", "2", "--first")
+
+    def test_numbered_and_sep_are_mutually_exclusive(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("get", "example", "-n", "--sep", ",")
+
+    def test_show_takes_the_same_flags(self):
+        _, out, _ = self.run_cli("show", "example", "--host", "--first")
+        self.assertEqual(out, "a.example.local\n")
+
+
 class TestCliComplete(CliTestCase):
     def setUp(self):
         super().setUp()

@@ -80,15 +80,21 @@ def _cmd_list(args: argparse.Namespace) -> int:
 def _cmd_select(args: argparse.Namespace) -> int:
     """Print bare ip/hostname values for the matching entries, one per line."""
     field = "both" if args.both else ("host" if args.host else "ip")
-    data = hh.select(args.pattern, field)
+    index = "1" if args.first else args.index
+    data = hh.select(args.pattern, field, index)
     if args.json:
         print(json.dumps(data, indent=2))
         return 0
-    if not data["values"]:
+    values = data["values"]
+    if not values:
         print(f"error: no managed entry matches {' '.join(args.pattern)!r}", file=sys.stderr)
         return 1
-    for value in data["values"]:
-        print(value)
+    if args.numbered:
+        width = len(str(len(values)))
+        for position, value in enumerate(values, 1):
+            print(f"{position:>{width}}  {value}")
+        return 0
+    print(args.sep.join(values))
     return 0
 
 
@@ -196,11 +202,36 @@ _COMPLETE_KINDS = ("commands",) + hh.COMPLETE_KINDS
 
 
 def _add_select_flags(parser: argparse.ArgumentParser) -> None:
-    """Attach the mutually exclusive --ip/--host/--both field selectors."""
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--ip", action="store_true", help="print IPs only (default)")
-    group.add_argument("--host", action="store_true", help="print hostnames only")
-    group.add_argument("--both", action="store_true", help="print the IP and its hostnames")
+    """Attach the field selectors plus the which-value/how-to-print controls."""
+    field = parser.add_mutually_exclusive_group()
+    field.add_argument("--ip", action="store_true", help="print IPs only (default)")
+    field.add_argument("--host", action="store_true", help="print hostnames only")
+    field.add_argument("--both", action="store_true", help="print the IP and its hostnames")
+
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument(
+        "-i",
+        "--index",
+        metavar="SPEC",
+        help="keep only these 1-based lines: 2, -1 (last), 2-4, or 1,3",
+    )
+    # Deliberately no "-1" alias: an option that looks like a negative number
+    # makes argparse stop accepting `--index -1` as a value.
+    which.add_argument("--first", action="store_true", help="shorthand for --index 1")
+
+    shape = parser.add_mutually_exclusive_group()
+    shape.add_argument(
+        "-n",
+        "--numbered",
+        action="store_true",
+        help="number the values so you can pick one with --index",
+    )
+    shape.add_argument(
+        "--sep",
+        default="\n",
+        metavar="S",
+        help="join values with S instead of a newline (e.g. --sep , for nmap)",
+    )
 
 
 def _add_entry_parsers(sub: "argparse._SubParsersAction") -> None:

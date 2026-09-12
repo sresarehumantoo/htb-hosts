@@ -531,14 +531,57 @@ def _selected_hostnames(entry: Entry, patterns: list[str]) -> list[str]:
     return hit or list(entry.hostnames)
 
 
-def select(patterns: Any = None, field: str = "ip") -> Dict:
+# One index spec item: "2", "-1" (from the end) or the inclusive range "2-4".
+_INDEX_RE = re.compile(r"^(?P<from>-?\d+)(?:-(?P<to>\d+))?$")
+
+
+def resolve_index(spec: Any, count: int) -> list[int]:
+    """Turn a 1-based index spec into 0-based positions into a list of `count`.
+
+    Accepts an int, or a string/list of comma or space separated items: a single
+    index ("2"), an index from the end ("-1") or an inclusive range ("2-4").
+    Positions are returned in the order asked for, deduplicated. Out-of-range is
+    an error rather than a silent drop: a pipeline must not quietly receive
+    fewer arguments than the command line asked for.
+    """
+    positions: list[int] = []
+    for token in parse_tokens([str(spec)] if isinstance(spec, int) else spec):
+        match = _INDEX_RE.match(token)
+        if not match:
+            raise HostsError(f"invalid index: {token!r} (use e.g. 2, -1, or 2-4)")
+        start, stop = match.group("from"), match.group("to")
+        if stop is None:
+            wanted = [int(start)]
+        elif int(start) < 1:
+            raise HostsError(f"invalid range: {token!r} (ranges are 1-based and positive)")
+        elif int(start) > int(stop):
+            raise HostsError(f"invalid range: {token!r} (start is past the end)")
+        else:
+            wanted = list(range(int(start), int(stop) + 1))
+        for num in wanted:
+            if num == 0:
+                raise HostsError("invalid index: 0 (indexes are 1-based)")
+            pos = num - 1 if num > 0 else count + num
+            if not 0 <= pos < count:
+                raise HostsError(f"index {num} is out of range ({count} value(s) available)")
+            if pos not in positions:
+                positions.append(pos)
+    return positions
+
+
+def select(patterns: Any = None, field: str = "ip", index: Any = None) -> Dict:
     """Pick managed entries by fuzzy pattern and return bare values for piping.
 
     `patterns` is a string or list (comma/space separated); each is matched
     case-insensitively against an entry's IP, tag and hostnames. `field` chooses
     what lands in "values": "ip" (default), "host", or "both". Values are
     deduplicated in first-seen order, so `nmap $(htb-hosts get example)` gets a
-    clean target list. No match is not an error here — "values" is just empty.
+    clean target list.
+
+    `index` narrows "values" to the given 1-based line(s) — the answer to a box
+    whose several hostnames would otherwise word-split into several arguments
+    (see `resolve_index` for the accepted forms). No match is not an error here:
+    "values" is just empty, and `index` is not applied to an empty list.
     """
     key = SELECT_FIELDS.get((field or "ip").strip().lower())
     if key is None:
@@ -554,9 +597,12 @@ def select(patterns: Any = None, field: str = "ip") -> Dict:
             values.extend(_selected_hostnames(entry, pats))
     seen: set[str] = set()
     unique = [v for v in values if not (v in seen or seen.add(v))]
+    if index is not None and unique:
+        unique = [unique[pos] for pos in resolve_index(index, len(unique))]
     return {
         "patterns": pats,
         "field": key,
+        "index": index,
         "entries": [e.to_dict() for e in matched],
         "values": unique,
     }

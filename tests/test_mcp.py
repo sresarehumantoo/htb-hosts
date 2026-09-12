@@ -135,6 +135,21 @@ class TestTools(McpTestCase):
         reply = self.call("htb_hosts_select", {"patterns": ["example"], "field": "host"})
         self.assertEqual(json.loads(self.text(reply))["values"], ["example.local"])
 
+    def test_select_index(self):
+        self.call(
+            "htb_hosts_add",
+            {"ip": "10.10.11.6", "hostnames": "a.example.local, b.example.local"},
+        )
+        reply = self.call(
+            "htb_hosts_select", {"patterns": ["example"], "field": "host", "index": -1}
+        )
+        self.assertEqual(json.loads(self.text(reply))["values"], ["b.example.local"])
+
+    def test_select_out_of_range_index_is_a_tool_error(self):
+        self.call("htb_hosts_add", {"ip": "10.10.11.6", "hostnames": ["a.example.local"]})
+        reply = self.call("htb_hosts_select", {"patterns": ["example"], "index": "7"})
+        self.assertTrue(reply["result"]["isError"])
+
     def test_select_bad_field_is_a_tool_error(self):
         reply = self.call("htb_hosts_select", {"field": "port"})
         self.assertTrue(reply["result"]["isError"])

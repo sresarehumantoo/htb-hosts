@@ -103,6 +103,8 @@ htb-hosts show                                          # box-grouped overview
 htb-hosts show full                                     # also show unmanaged/system lines
 htb-hosts get forest                                    # just the IP, for $(...)
 htb-hosts get forest --host                             # just the hostnames
+htb-hosts get forest --host --first                     # just the first hostname
+htb-hosts get forest --host -n                          # numbered, to pick an index
 htb-hosts list                                          # flat list of managed entries
 htb-hosts rm forest.htb                                 # remove one hostname
 htb-hosts clean --tag forest                            # remove a whole box
@@ -123,6 +125,7 @@ spaces. Add `--json` to most commands for machine-readable output.
 | `rm <host\|ip>` | Remove a hostname or a whole IP from the block |
 | `show [full]` | Pretty, box-grouped overview (`full` adds unmanaged lines) |
 | `show <pattern>` / `get <pattern>` | Bare values for matching entries, for `$(…)` |
+| `get … --index N` / `--first` | Keep only the Nth value when a box has several |
 | `list [--tag T]` | Flat list of managed entries |
 | `clean [--tag T \| --exclude P…]` | Remove all, one box, or all-but-matches |
 | `retag` | Re-derive every tag from its box name |
@@ -153,6 +156,36 @@ falling back to all of the entry's names when the match came from its IP or tag.
 
 Nothing matched is an error: stdout stays empty and the exit code is `1`, so a
 typo can't silently hand an empty target list to the next command.
+
+#### Picking one of several values
+
+A box with a few vhosts has a few hostnames on one IP, and pasting all of them
+into `$(...)` word-splits into several arguments — `curl http://a.htb b.htb c.htb/`.
+`-n`/`--numbered` shows you what's there, and `-i`/`--index` keeps just the lines
+you want (1-based):
+
+```console
+$ htb-hosts get forest --host -n
+1  forest.htb
+2  dc01.forest.htb
+3  www.forest.htb
+
+$ curl "http://$(htb-hosts get forest --host --first)/"    # -> forest.htb
+$ htb-hosts get forest --host -i 2                         # -> dc01.forest.htb
+$ htb-hosts get forest --host -i -1                        # last one
+$ htb-hosts get forest --host -i 2-3                       # a range
+$ htb-hosts get forest --host -i 1,3                       # a list, in that order
+```
+
+`--first` is shorthand for `--index 1`. An out-of-range index is an error (exit
+`2`, empty stdout) rather than a silent drop, for the same reason an empty match
+is: a pipeline should never quietly get fewer arguments than you asked for.
+
+When you want every value but on **one** line, `--sep` joins them instead:
+
+```bash
+nmap $(htb-hosts get forest --sep ,)      # -> nmap 10.10.11.161,10.10.11.162
+```
 
 ### Tab completion
 

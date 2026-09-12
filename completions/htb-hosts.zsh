@@ -13,12 +13,20 @@ _htb-hosts_words() {
   (( ${#items} )) && _describe -t "$1" "$2" items
 }
 
-_htb-hosts_field_flags() {
-  _values 'field' \
-    '--ip[print IPs only (default)]' \
-    '--host[print hostnames only]' \
-    '--both[print the IP and its hostnames]'
-}
+# The which-value / how-to-print flags shared by `show` and `get`. No hyphen in
+# the name: zsh allows them in function names but not in parameter names, and an
+# invalid assignment is silently reparsed as a command (with a confusing
+# "unknown file attribute" glob error).
+_htb_hosts_select_flags=(
+  '(--host --both)--ip[print IPs only (default)]'
+  '(--ip --both)--host[print hostnames only]'
+  '(--ip --host)--both[print the IP and its hostnames]'
+  '(--first)'{-i,--index}'[keep only these 1-based lines: 2, -1, 2-4, 1,3]:spec:'
+  '(-i --index)--first[shorthand for --index 1]'
+  '(--sep)'{-n,--numbered}'[number the values so you can pick one with --index]'
+  '(-n --numbered)--sep[join values with this instead of a newline]:separator:'
+  '--json[machine-readable output]'
+)
 
 _htb-hosts() {
   local curcontext="$curcontext" state line ret=1
@@ -76,18 +84,12 @@ _htb-hosts() {
         show)
           _arguments \
             '--full[also list unmanaged/system entries]' \
-            '(--host --both)--ip[print IPs only (default)]' \
-            '(--ip --both)--host[print hostnames only]' \
-            '(--ip --host)--both[print the IP and its hostnames]' \
-            '--json[machine-readable output]' \
+            $_htb_hosts_select_flags \
             '*:pattern or full:->showargs' && ret=0
           ;;
         get|select)
           _arguments \
-            '(--host --both)--ip[print IPs only (default)]' \
-            '(--ip --both)--host[print hostnames only]' \
-            '(--ip --host)--both[print the IP and its hostnames]' \
-            '--json[machine-readable output]' \
+            $_htb_hosts_select_flags \
             '*:pattern:->targets' && ret=0
           ;;
         backup)
