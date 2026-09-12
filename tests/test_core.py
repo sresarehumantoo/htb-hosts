@@ -472,6 +472,54 @@ class TestSelect(HostsTestCase):
             self.core.select("example", "port")
 
 
+class TestComplete(HostsTestCase):
+    def setUp(self):
+        super().setUp()
+        self.core.add("10.10.11.6", ["example.local", "jobs.example.local"])
+        self.core.add("10.10.11.5", ["dc01.forest.htb"])
+
+    def test_hosts(self):
+        self.assertEqual(
+            self.core.complete("hosts"),
+            ["dc01.forest.htb", "example.local", "jobs.example.local"],
+        )
+
+    def test_ips(self):
+        self.assertEqual(self.core.complete("ips"), ["10.10.11.5", "10.10.11.6"])
+
+    def test_tags(self):
+        self.assertEqual(self.core.complete("tags"), ["example", "forest"])
+
+    def test_selectors_are_hostnames_and_ips_but_never_tags(self):
+        selectors = self.core.complete("selectors")
+        self.assertIn("dc01.forest.htb", selectors)
+        self.assertIn("10.10.11.5", selectors)
+        self.assertNotIn("forest", selectors)  # a tag is not a valid `rm` selector
+
+    def test_targets_is_the_union(self):
+        targets = self.core.complete("targets")
+        self.assertEqual(len(targets), 7)
+        self.assertEqual(targets, sorted(targets))
+        self.assertIn("forest", targets)
+        self.assertIn("10.10.11.5", targets)
+        self.assertIn("dc01.forest.htb", targets)
+
+    def test_backups_reverse_the_oldest_first_listing(self):
+        self.core.backup(label="one")
+        self.core.backup(label="two")
+        oldest_first = [b["name"] for b in self.core.list_backups()]
+        self.assertGreater(len(oldest_first), 1)
+        self.assertEqual(self.core.complete("backups"), oldest_first[::-1])
+
+    def test_backups_without_a_backup_dir(self):
+        self.core.BACKUP_DIR = os.path.join(self.tmp, "no-such-dir")
+        self.assertEqual(self.core.complete("backups"), [])
+
+    def test_unknown_kind_raises(self):
+        with self.assertRaises(self.core.HostsError):
+            self.core.complete("nope")
+
+
 class TestDoctorMarkers(HostsTestCase):
     def test_doctor_ok_with_intact_block(self):
         self.core.add("10.0.0.1", ["a.htb"])

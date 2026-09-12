@@ -167,10 +167,32 @@ def _cmd_restore(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_complete(args: argparse.Namespace) -> int:
+    """Emit one candidate word per line for the shell completion scripts.
+
+    Deliberately silent on failure: a malformed /etc/hosts or a missing backup
+    directory must never spray errors into somebody's prompt mid-<TAB>.
+    """
+    try:
+        if args.kind == "commands":
+            words = args.commands
+        else:
+            words = hh.complete(args.kind)
+    except (OSError, ValueError, hh.HostsError):
+        return 0
+    if words:
+        print("\n".join(words))
+    return 0
+
+
 def _cmd_doctor(_args: argparse.Namespace) -> int:
     info = hh.doctor()
     print(json.dumps(info, indent=2))
     return 0 if info["ok"] else 1
+
+
+# Subcommands offered by tab completion: everything except `complete` itself.
+_COMPLETE_KINDS = ("commands",) + hh.COMPLETE_KINDS
 
 
 def _add_select_flags(parser: argparse.ArgumentParser) -> None:
@@ -181,14 +203,8 @@ def _add_select_flags(parser: argparse.ArgumentParser) -> None:
     group.add_argument("--both", action="store_true", help="print the IP and its hostnames")
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    """Construct the argument parser with all subcommands."""
-    parser = argparse.ArgumentParser(
-        prog="htb-hosts",
-        description="Add/remove HTB hosts in /etc/hosts (no sudo needed).",
-    )
-    sub = parser.add_subparsers(dest="cmd", required=True)
-
+def _add_entry_parsers(sub: "argparse._SubParsersAction") -> None:
+    """Register the commands that change the managed block."""
     p_add = sub.add_parser("add", help="add/update a host entry")
     p_add.add_argument(
         "args",
@@ -219,6 +235,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_clean.add_argument("--json", action="store_true")
     p_clean.set_defaults(func=_cmd_clean)
 
+
+def _add_query_parsers(sub: "argparse._SubParsersAction") -> None:
+    """Register the read-only commands that report or select entries."""
     p_list = sub.add_parser("list", help="list managed entries")
     p_list.add_argument("--tag")
     p_list.add_argument("--json", action="store_true")
@@ -264,6 +283,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_get.add_argument("--json", action="store_true")
     p_get.set_defaults(func=_cmd_select)
 
+
+def _add_maintenance_parsers(sub: "argparse._SubParsersAction") -> None:
+    """Register the housekeeping commands (migrate/retag/backup/restore/doctor)."""
     p_migrate = sub.add_parser("migrate", help="one-time import of existing entries into the block")
     p_migrate.set_defaults(func=_cmd_migrate)
 
@@ -284,6 +306,30 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_doctor = sub.add_parser("doctor", help="check writability / show the setfacl fix")
     p_doctor.set_defaults(func=_cmd_doctor)
+
+    # Hidden: the data source for the shell completion scripts. Passing no
+    # `help` at all is what keeps it out of the command list (argparse prints a
+    # literal "==SUPPRESS==" row for help=SUPPRESS on a subparser).
+    p_complete = sub.add_parser("complete")
+    p_complete.add_argument("kind", choices=_COMPLETE_KINDS)
+    p_complete.set_defaults(func=_cmd_complete)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """Construct the argument parser with all subcommands."""
+    parser = argparse.ArgumentParser(
+        prog="htb-hosts",
+        description="Add/remove HTB hosts in /etc/hosts (no sudo needed).",
+    )
+    # metavar keeps the hidden `complete` command out of the usage line too.
+    sub = parser.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
+    _add_entry_parsers(sub)
+    _add_query_parsers(sub)
+    _add_maintenance_parsers(sub)
+
+    # Every namespace carries the completable command names (aliases included,
+    # `complete` itself excluded) so `complete commands` needs no introspection.
+    parser.set_defaults(commands=sorted(n for n in sub.choices if n != "complete"))
     return parser
 
 

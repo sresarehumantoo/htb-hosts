@@ -562,6 +562,35 @@ def select(patterns: Any = None, field: str = "ip") -> Dict:
     }
 
 
+COMPLETE_KINDS = ("hosts", "ips", "tags", "selectors", "targets", "backups")
+
+
+def complete(kind: str) -> list[str]:
+    """Return candidate words for shell tab completion.
+
+    "hosts"/"ips"/"tags" are the managed hostnames, IPs and tags. "selectors" is
+    hostnames + IPs — what `add` and `rm` name an entry by. "targets" adds tags
+    on top, which is what a fuzzy pattern (`get`, `clean --exclude`) may match.
+    "backups" is the snapshot names, newest first. Everything is deduplicated;
+    only "backups" keeps a meaningful order, the rest are sorted so the
+    completion menu is stable.
+    """
+    if kind == "backups":
+        return [b["name"] for b in reversed(list_backups())]
+    if kind not in COMPLETE_KINDS:
+        raise HostsError(f"unknown completion kind: {kind!r} (use {', '.join(COMPLETE_KINDS)})")
+    _, entries, _ = _split(_read())
+    words: set[str] = set()
+    for entry in entries:
+        if kind in ("hosts", "selectors", "targets"):
+            words.update(entry.hostnames)
+        if kind in ("ips", "selectors", "targets"):
+            words.add(entry.ip)
+        if kind in ("tags", "targets") and entry.tag:
+            words.add(entry.tag)
+    return sorted(words)
+
+
 def _is_infra(line: str) -> bool:
     """True for lines that must stay outside the managed block on migrate."""
     stripped = line.strip()

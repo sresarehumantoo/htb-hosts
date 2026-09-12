@@ -16,13 +16,19 @@ HOSTS_USER ?= $(REAL_USER)
 HOSTS_FILE ?= /etc/hosts
 SUDO       ?= sudo
 
+# Both are on the default search paths: /usr/local/share/zsh/site-functions is
+# in zsh's stock $fpath, and bash-completion looks under every XDG_DATA_DIRS
+# entry (default /usr/local/share:/usr/share).
+ZSH_COMPDIR  ?= $(PREFIX)/share/zsh/site-functions
+BASH_COMPDIR ?= $(PREFIX)/share/bash-completion/completions
+
 CLI     := $(BINDIR)/htb-hosts
 MCP_CMD := python3 $(LIBDIR)/mcp_server.py
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install install-files install-acl mcp remove purge migrate \
-        lint format test smoke reinstall clean
+.PHONY: help install install-files install-acl mcp completions remove purge \
+        migrate lint lint-completions format test smoke reinstall clean
 
 help: ## Show this help
 	@echo "htb-hosts targets:"
@@ -31,7 +37,7 @@ help: ## Show this help
 	@echo
 	@echo "Vars: HOSTS_USER=$(HOSTS_USER) LIBDIR=$(LIBDIR) BINDIR=$(BINDIR) SUDO=$(SUDO)"
 
-install: install-files install-acl mcp ## Install everything (files + ACL + MCP)
+install: install-files install-acl completions mcp ## Install everything (files + ACL + completions + MCP)
 	@if [ "$(HOSTS_USER)" = root ]; then \
 		echo "!! HOSTS_USER=root — no unprivileged user got the ACL, so no-sudo use"; \
 		echo "   won't work. Run 'make install' as your normal user, or pass"; \
@@ -45,6 +51,12 @@ install-files: ## Copy the library and CLI into place (needs sudo)
 	$(SUDO) install -m 0755 src/mcp_server.py $(LIBDIR)/mcp_server.py
 	$(SUDO) install -m 0755 src/htb-hosts     $(CLI)
 	$(SUDO) chmod -R go-w $(LIBDIR)  # incl. any __pycache__ from earlier runs
+
+completions: ## Install the zsh + bash tab completions
+	$(SUDO) install -d -m 0755 $(ZSH_COMPDIR) $(BASH_COMPDIR)
+	$(SUDO) install -m 0644 completions/htb-hosts.zsh  $(ZSH_COMPDIR)/_htb-hosts
+	$(SUDO) install -m 0644 completions/htb-hosts.bash $(BASH_COMPDIR)/htb-hosts
+	@echo "==> completions installed (start a new shell, or run 'rm -f ~/.zcompdump && compinit')"
 
 install-acl: ## Grant $(HOSTS_USER) sudo-free write on $(HOSTS_FILE) via ACL
 	$(SUDO) setfacl -m u:$(HOSTS_USER):rw $(HOSTS_FILE)
@@ -69,9 +81,9 @@ migrate: ## One-time import of existing /etc/hosts entries into the managed bloc
 
 remove: ## Uninstall software (leaves /etc/hosts entries + ACL untouched)
 	-claude mcp remove -s user htb-hosts 2>/dev/null
-	$(SUDO) rm -f $(CLI)
+	$(SUDO) rm -f $(CLI) $(ZSH_COMPDIR)/_htb-hosts $(BASH_COMPDIR)/htb-hosts
 	$(SUDO) rm -rf $(LIBDIR)
-	@echo "==> removed binaries + MCP registration."
+	@echo "==> removed binaries + completions + MCP registration."
 	@echo "   /etc/hosts entries and the ACL are left intact."
 	@echo "   Run 'make purge' instead to also wipe them."
 
@@ -79,7 +91,7 @@ purge: ## Full removal: managed block + ACL + software
 	-$(CLI) clean 2>/dev/null
 	-$(SUDO) setfacl -x u:$(HOSTS_USER) $(HOSTS_FILE) 2>/dev/null
 	-claude mcp remove -s user htb-hosts 2>/dev/null
-	$(SUDO) rm -f $(CLI)
+	$(SUDO) rm -f $(CLI) $(ZSH_COMPDIR)/_htb-hosts $(BASH_COMPDIR)/htb-hosts
 	$(SUDO) rm -rf $(LIBDIR)
 	@echo "==> purged: managed block cleared, ACL removed, software uninstalled."
 
@@ -94,6 +106,14 @@ lint: ## Run black --check and pylint on src (strict 10.0) and tests (relaxed)
 		pylint src/htb_hosts.py src/mcp_server.py $$tmpdir/_htb_hosts_cli.py; \
 		rc=$$?; rm -rf $$tmpdir; [ $$rc -eq 0 ] || exit $$rc
 	pylint --disable=$(TEST_LINT_SKIP) tests/*.py
+
+lint-completions: ## Syntax-check the shell completion scripts
+	bash -n completions/htb-hosts.bash
+	@if command -v zsh >/dev/null 2>&1; then \
+		zsh -n completions/htb-hosts.zsh && echo "==> zsh + bash completions parse"; \
+	else \
+		echo "-- zsh not installed; checked bash only"; \
+	fi
 
 format: ## Auto-format the sources and tests with black
 	black src/htb_hosts.py src/mcp_server.py src/htb-hosts tests/*.py
@@ -116,6 +136,10 @@ smoke: ## Quick end-to-end CLI check against a throwaway hosts file
 			|| (echo "show <pattern> did not select the hostname" && exit 1); \
 		python3 $$PY get nosuchbox >/dev/null 2>&1 \
 			&& (echo "get should fail when nothing matches" && exit 1) || true; \
+		python3 $$PY complete tags | grep -qx sequel \
+			|| (echo "complete tags missing the sequel box" && exit 1); \
+		python3 $$PY complete commands | grep -qx get \
+			|| (echo "complete commands missing get" && exit 1); \
 		python3 $$PY backup --label smoke; \
 		python3 $$PY list; \
 		python3 $$PY clean --exclude sequel; \

@@ -54,6 +54,8 @@ cleaned 3 entry/entries (all except ~forest)
   automatic backups on every change (loud warning if a snapshot ever fails).
 - ⏪ **Backup & restore** — named snapshots (private: `0700`/`0600`) and
   one-command rollback.
+- ⌨️ **Tab completion** — zsh and bash completions for commands, flags, and your
+  live hostnames, IPs, tags, and snapshots.
 - 🤖 **MCP server included** — first-class tools for Claude Code / MCP agents.
 - 🪶 **Zero runtime dependencies** — pure Python standard library.
 
@@ -69,7 +71,8 @@ make install
 ```
 
 `make install` copies the tool into `/opt/htb-hosts` and `/usr/local/bin`, grants
-your user an ACL on `/etc/hosts`, and registers the MCP server. It works whether
+your user an ACL on `/etc/hosts`, installs the shell completions, and registers the
+MCP server. It works whether
 you run it directly or under `sudo` — the steps that need privilege call `sudo`
 themselves, and the human user is auto-detected (`SUDO_USER` when under sudo, else
 the current user) so the ACL always targets **you**, not root. Override with
@@ -77,6 +80,9 @@ the current user) so the ACL always targets **you**, not root. Override with
 
 > The one-time install needs privilege (it writes to `/opt` and `/usr/local/bin`
 > and sets the ACL). Everyday `htb-hosts` use afterward needs **no** sudo.
+
+New shells pick the completions up automatically; in a shell that is already open,
+`exec zsh` (or `rm -f ~/.zcompdump && compinit`) refreshes them.
 
 Already have a pile of entries in `/etc/hosts`? Pull them into the managed block:
 
@@ -147,6 +153,29 @@ falling back to all of the entry's names when the match came from its IP or tag.
 
 Nothing matched is an error: stdout stays empty and the exit code is `1`, so a
 typo can't silently hand an empty target list to the next command.
+
+### Tab completion
+
+`make install` drops a zsh completion in `$PREFIX/share/zsh/site-functions` and a
+bash one in `$PREFIX/share/bash-completion/completions` — both on the default
+search paths, so no rc-file edit is needed. `make completions` installs just those.
+
+Completion is **live**: candidates come from the managed block as it stands right
+now, not a static list.
+
+| You type | You get |
+|----------|---------|
+| `htb-hosts <TAB>` | subcommands, with descriptions |
+| `htb-hosts rm <TAB>` | your managed hostnames and IPs |
+| `htb-hosts get <TAB>` | hostnames, IPs **and** tags (anything a pattern matches) |
+| `htb-hosts clean --tag <TAB>` | your box tags |
+| `htb-hosts restore <TAB>` | your snapshots, newest first |
+| `htb-hosts add … --<TAB>` | that subcommand's flags |
+
+The scripts get their data from `htb-hosts complete <kind>`, a hidden subcommand
+that prints one candidate per line. It is deliberately silent on failure — an
+unreadable or malformed `/etc/hosts` degrades completion rather than spraying
+errors into your prompt.
 
 ### Tagging
 
@@ -270,6 +299,7 @@ check, the in-place-edit (inode-preserving) invariant that protects the ACL,
 src/htb_hosts.py    core library (parse/validate/lock/backup)  → /opt/htb-hosts
 src/mcp_server.py   zero-dependency stdio JSON-RPC MCP server   → /opt/htb-hosts
 src/htb-hosts       CLI entrypoint                              → /usr/local/bin
+completions/        zsh + bash tab completion scripts           → share/{zsh,bash-completion}
 tests/              unittest suite (core, CLI, MCP)
 Makefile            install / remove / lint / test targets
 pyproject.toml      black + pylint config (line length 100)

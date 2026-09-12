@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import os
 import unittest
 
 from base import HostsTestCase
@@ -177,6 +178,41 @@ class TestCliSelect(CliTestCase):
         payload = json.loads(out)
         self.assertEqual(payload["field"], "ip")
         self.assertEqual(payload["values"], ["10.10.11.6"])
+
+
+class TestCliComplete(CliTestCase):
+    def setUp(self):
+        super().setUp()
+        self.run_cli("add", "10.10.11.6", "example.local, jobs.example.local")
+
+    def test_commands_includes_aliases_but_not_complete_itself(self):
+        code, out, _ = self.run_cli("complete", "commands")
+        self.assertEqual(code, 0)
+        words = out.split()
+        self.assertIn("get", words)
+        self.assertIn("select", words)
+        self.assertNotIn("complete", words)
+
+    def test_hosts_one_per_line(self):
+        _, out, _ = self.run_cli("complete", "hosts")
+        self.assertEqual(out.split("\n")[:2], ["example.local", "jobs.example.local"])
+
+    def test_tags(self):
+        _, out, _ = self.run_cli("complete", "tags")
+        self.assertEqual(out.strip(), "example")
+
+    def test_stays_silent_when_the_hosts_file_is_unreadable(self):
+        self.core.HOSTS_FILE = os.path.join(self.tmp, "definitely", "missing")
+        code, out, err = self.run_cli("complete", "targets")
+        self.assertEqual((code, out, err), (0, "", ""))
+
+    def test_complete_is_hidden_from_help(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("--help")
+
+    def test_unknown_kind_is_a_usage_error(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("complete", "nope")
 
 
 class TestCliBackup(CliTestCase):

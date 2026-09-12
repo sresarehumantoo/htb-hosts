@@ -41,3 +41,9 @@ jobs:
         run: pip install "black==26.5.1" "pylint==4.0.6"
       - name: Lint (black --check + pylint 10.00/10)
         run: make lint
+      # The completion scripts need a shell, not Python, so they get their own
+      # syntax gate; zsh is not on the runner by default.
+      - name: Install zsh
+        run: sudo apt-get update && sudo apt-get install -y zsh
+      - name: Lint the shell completions
+        run: make lint-completions
