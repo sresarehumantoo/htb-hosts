@@ -109,7 +109,7 @@ htb-hosts get forest --host -i 1                        # just the first hostnam
 htb-hosts get forest --host -n                          # numbered, to pick an index
 htb-hosts rm forest.htb                                 # remove one hostname
 htb-hosts clean --tag forest                            # remove a whole box
-htb-hosts clean --match forest fleet                    # remove what `get` would show
+htb-hosts clean --match forest web                      # remove what `get` would show
 htb-hosts clean --exclude forest                        # remove everything EXCEPT forest
 htb-hosts clean                                         # wipe all managed entries
 htb-hosts doctor                                        # check access / show the fix
@@ -250,16 +250,16 @@ htb-hosts retag
 `--match` takes the same patterns as `get`, so what you selected is what goes:
 
 ```console
-$ htb-hosts get example web --host      # check first
-web01.example.htb
-web02.example.htb
+$ htb-hosts get forest web --host       # check first
+web01.forest.htb
+web02.forest.htb
 
-$ htb-hosts clean --match example web
+$ htb-hosts clean --match forest web
 will remove 2 entries:
-  10.10.11.8     web01.example.htb  [tag=example]
-  10.10.11.8     web02.example.htb  [tag=example]
+  10.10.11.161    web01.forest.htb  [tag=forest]
+  10.10.11.161    web02.forest.htb  [tag=forest]
 proceed? [y/N] y
-cleaned 2 entry/entries (~example web)
+cleaned 2 entry/entries (~forest web)
 ```
 
 Because a fuzzy pattern is the one removal you cannot verify by reading the
