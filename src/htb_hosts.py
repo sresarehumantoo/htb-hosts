@@ -63,9 +63,6 @@ class HostsError(Exception):
     """User-facing error (bad input, permission problem, etc.)."""
 
 
-# --------------------------------------------------------------------------- #
-# Validation
-# --------------------------------------------------------------------------- #
 def validate_ip(ip: str) -> str:
     """Return the normalized IP string, or raise HostsError."""
     try:
@@ -143,9 +140,6 @@ def split_ip_and_hosts(tokens: list[str]) -> tuple[str, list[str]]:
     return ips[0], hosts
 
 
-# --------------------------------------------------------------------------- #
-# Model
-# --------------------------------------------------------------------------- #
 class Entry:
     """A single managed hosts line: one IP, one or more hostnames, metadata."""
 
@@ -203,9 +197,6 @@ def _parse_entry(line: str) -> Optional[Entry]:
     return Entry(ip, hosts, tag, added)
 
 
-# --------------------------------------------------------------------------- #
-# File read / split / write
-# --------------------------------------------------------------------------- #
 Mutator = Callable[
     [list[str], list[Entry], list[str]],
     tuple[list[str], list[Entry], list[str], Any],
@@ -363,9 +354,6 @@ def _transaction(mutate: Mutator) -> Any:
     return _locked_write(builder)
 
 
-# --------------------------------------------------------------------------- #
-# Operations
-# --------------------------------------------------------------------------- #
 def add(ip: str, hostnames: Any, tag: Optional[str] = None) -> Dict:
     """Add or update a managed entry; idempotent upsert keyed on IP.
 
@@ -804,9 +792,6 @@ def doctor() -> Dict:
     return info
 
 
-# --------------------------------------------------------------------------- #
-# Backup / restore
-# --------------------------------------------------------------------------- #
 def list_backups() -> list[Dict]:
     """Return available snapshots (auto + explicit), oldest first."""
     if not os.path.isdir(BACKUP_DIR):
