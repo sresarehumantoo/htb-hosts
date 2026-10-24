@@ -15,11 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       # Actions pinned to commit SHAs (tags are movable) — same spirit as the
-      # pinned linter versions below.
+      # locked linter versions below.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -33,12 +35,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.13"
-      # Pinned so the 10.00/10 gate is reproducible and immune to linter drift.
-      - name: Install linters
-        run: pip install "black==26.5.1" "pylint==4.0.6"
+          persist-credentials: false
+      # black/pylint come from uv.lock, so the 10.00/10 gate is reproducible and
+      # immune to linter drift.
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.17"
+          python-version: "3.14"
+          enable-cache: false
       - name: Lint (black --check + pylint 10.00/10)
         run: make lint
       # The completion scripts need a shell, not Python, so they get their own
@@ -47,3 +52,21 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y zsh
       - name: Lint the shell completions
         run: make lint-completions
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.17"
+          python-version: "3.14"
+          enable-cache: false
+      # Locked dev deps against OSV, then zizmor over this workflow. The token
+      # lets zizmor run its online audits (impostor commits, vulnerable actions).
+      - name: Audit dependencies and workflows
+        run: make audit
+        env:
+          GH_TOKEN: ${{ github.token }}
