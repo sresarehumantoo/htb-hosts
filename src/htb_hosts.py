@@ -4,8 +4,8 @@ Core library shared by the CLI (/usr/local/bin/htb-hosts) and the MCP server
 (/opt/htb-hosts/mcp_server.py). Everything the tool owns lives inside a single
 delimited "managed block"; lines outside the markers are never touched.
 
-Key constraint: on the real /etc/hosts, unprivileged access is granted to owen
-via a POSIX ACL (`setfacl -m u:owen:rw /etc/hosts`). owen is NOT the file owner
+Key constraint: on the real /etc/hosts, unprivileged access is granted to the
+user via a POSIX ACL (`setfacl -m u:<user>:rw /etc/hosts`). They are NOT the file owner
 and therefore cannot re-apply an ACL, so we must edit the file IN PLACE
 (open r+, rewrite, truncate) and never write-temp-then-rename: a rename would
 drop the ACL and flip ownership back to whoever ran the tool.
@@ -17,6 +17,7 @@ import datetime
 import fcntl
 import ipaddress
 import os
+import pwd
 import re
 import stat
 import sys
@@ -306,7 +307,7 @@ def _backup(text: str) -> None:
 
 def _permission_hint() -> str:
     """Return a human-readable hint for restoring write access via setfacl."""
-    user = os.environ.get("USER") or os.environ.get("LOGNAME") or "owen"
+    user = os.environ.get("USER") or os.environ.get("LOGNAME") or pwd.getpwuid(os.getuid()).pw_name
     return (
         f"cannot write {HOSTS_FILE} without privileges. Grant access once as root:\n"
         f"    sudo setfacl -m u:{user}:rw {HOSTS_FILE}\n"
@@ -319,7 +320,7 @@ def _locked_write(builder: Callable[[str], tuple[str, Any]]) -> Any:
 
     `builder(original_text)` returns `(new_text, result)`. The file is rewritten
     only when the text differs, and always via an in-place truncate+write (never a
-    rename) so the POSIX ACL granting owen access survives. The prior content is
+    rename) so the POSIX ACL granting the user access survives. The prior content is
     backed up before any change.
     """
     try:
