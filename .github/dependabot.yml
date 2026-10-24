@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Rewrites the SHA pins in ci.yml and keeps their # vX.Y.Z comments in step.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Dev toolchain only (black, pylint, zizmor); bumps pyproject.toml + uv.lock.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      dev-tools:
+        patterns: ["*"]
