@@ -18,6 +18,7 @@ import fcntl
 import ipaddress
 import os
 import re
+import stat
 import sys
 from typing import Any, Callable, Optional
 
@@ -279,17 +280,28 @@ def _compose(pre: list[str], entries: list[Entry], post: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
+def _ensure_backup_dir() -> None:
+    """Create BACKUP_DIR as 0700, tightening an existing one; refuse one you don't own."""
+    os.makedirs(BACKUP_DIR, mode=0o700, exist_ok=True)
+    info = os.lstat(BACKUP_DIR)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise PermissionError(f"refusing to use {BACKUP_DIR}: not a directory owned by you")
+    if info.st_mode & 0o077:
+        os.chmod(BACKUP_DIR, 0o700)
+
+
 def _write_snapshot(path: str, text: str) -> None:
     """Write a snapshot file readable only by its owner (it may name lab targets)."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        os.fchmod(handle.fileno(), 0o600)  # the create mode does not apply to an existing file
         handle.write(text)
 
 
 def _backup(text: str) -> None:
     """Write a timestamped backup and prune to the last BACKUP_KEEP; best-effort."""
     try:
-        os.makedirs(BACKUP_DIR, mode=0o700, exist_ok=True)
+        _ensure_backup_dir()
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         _write_snapshot(os.path.join(BACKUP_DIR, f"{BACKUP_PREFIX}{stamp}"), text)
         backups = sorted(b for b in os.listdir(BACKUP_DIR) if b.startswith(BACKUP_PREFIX))
@@ -804,13 +816,15 @@ def list_backups() -> list[Dict]:
         if not (name.startswith(BACKUP_PREFIX) or name.startswith(SAVE_PREFIX)):
             continue
         path = os.path.join(BACKUP_DIR, name)
-        stat = os.stat(path)
+        info = os.lstat(path)
+        if not stat.S_ISREG(info.st_mode):
+            continue  # never offer a symlink: restore would copy its target into the file
         out.append(
             {
                 "name": name,
                 "path": path,
-                "bytes": stat.st_size,
-                "mtime": stat.st_mtime,
+                "bytes": info.st_size,
+                "mtime": info.st_mtime,
                 "kind": "save" if name.startswith(SAVE_PREFIX) else "auto",
             }
         )
@@ -824,7 +838,7 @@ def backup(label: Optional[str] = None) -> Dict:
     An optional `label` is appended to the filename for easy identification.
     """
     text = _read()
-    os.makedirs(BACKUP_DIR, mode=0o700, exist_ok=True)
+    _ensure_backup_dir()
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     suffix = f".{validate_tag(label)}" if label else ""
     name = f"{SAVE_PREFIX}{stamp}{suffix}"
@@ -833,12 +847,32 @@ def backup(label: Optional[str] = None) -> Dict:
     return {"name": name, "path": path, "bytes": len(text)}
 
 
+def _check_snapshot(name: str, content: str) -> None:
+    """Raise unless the snapshot's managed block is well-formed and every entry valid."""
+    problem = _marker_problem(content)
+    if problem:
+        raise HostsError(f"refusing to restore {name}: {problem}")
+    _, entries, _ = _split(content)
+    try:
+        for entry in entries:
+            validate_ip(entry.ip)
+            for host in entry.hostnames:
+                validate_hostname(host)
+            if entry.tag:
+                validate_tag(entry.tag)
+    except HostsError as exc:
+        raise HostsError(f"refusing to restore {name}: {exc}") from exc
+
+
 def restore(name: Optional[str] = None) -> Dict:
     """Restore the hosts file from a snapshot (most recent if `name` is omitted).
 
     `name` may be an exact backup filename or a substring (e.g. a label). The
     current content is snapshotted before the restore, which is written in place
     so the ACL is preserved.
+
+    The snapshot is written verbatim, so it must be a private regular file you
+    own, and its managed block must pass the same validation as `add`.
     """
     backups = list_backups()
     if not backups:
@@ -850,7 +884,15 @@ def restore(name: Optional[str] = None) -> Dict:
         chosen = matches[-1]
     else:
         chosen = backups[-1]
-    with open(chosen["path"], encoding="utf-8") as handle:
+    fd = os.open(chosen["path"], os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, encoding="utf-8") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+            raise HostsError(
+                f"refusing to restore {chosen['name']}: not a regular file owned and "
+                "writable only by you"
+            )
         content = handle.read()
+    _check_snapshot(chosen["name"], content)
     _locked_write(lambda original: (content, None))
     return {"restored_from": chosen["name"], "bytes": len(content)}

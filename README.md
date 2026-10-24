@@ -373,7 +373,7 @@ Tests load the modules directly from `src/`, so they exercise the in-repo copy
 regardless of what's installed under `/opt`, and each test runs against a throwaway
 temp file — your real `/etc/hosts` is never touched. Coverage includes input
 validation/injection rejection, add/merge/rehome/idempotency, clean/exclude,
-migration + tagging, backup/restore (including snapshot permissions and the
+migration + tagging, backup/restore (including snapshot permissions, symlink and tamper refusal, and the
 warn-but-don't-block behavior on backup failure), `doctor`'s marker-integrity
 check, the in-place-edit (inode-preserving) invariant that protects the ACL,
 `flock` concurrency, and the full CLI + MCP surfaces.

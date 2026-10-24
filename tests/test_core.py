@@ -6,7 +6,7 @@ import os
 import threading
 import unittest
 
-from base import HostsTestCase
+from base import INFRA, HostsTestCase
 
 
 class TestValidation(HostsTestCase):
@@ -414,6 +414,70 @@ class TestBackupHardening(HostsTestCase):
         self.core.BACKUP_DIR = os.path.join(blocker, "nope")
         with self.assertRaises(OSError):
             self.core.backup(label="x")
+
+    def test_existing_loose_backup_dir_is_tightened(self):
+        os.makedirs(self.core.BACKUP_DIR, mode=0o755)
+        os.chmod(self.core.BACKUP_DIR, 0o755)
+        self.core.backup(label="x")
+        self.assertEqual(os.stat(self.core.BACKUP_DIR).st_mode & 0o777, 0o700)
+
+    def test_symlinked_backup_dir_is_refused(self):
+        real = os.path.join(self.tmp, "elsewhere")
+        os.mkdir(real)
+        os.symlink(real, self.core.BACKUP_DIR)
+        with self.assertRaises(PermissionError):
+            self.core.backup(label="x")
+        self.assertEqual(os.listdir(real), [])
+
+    def test_snapshot_write_does_not_follow_a_symlink(self):
+        victim = os.path.join(self.tmp, "victim")
+        with open(victim, "w", encoding="utf-8") as handle:
+            handle.write("untouched\n")
+        os.makedirs(self.core.BACKUP_DIR, mode=0o700)
+        os.symlink(victim, os.path.join(self.core.BACKUP_DIR, "hosts.save.planted"))
+        with self.assertRaises(OSError):
+            self.core._write_snapshot(os.path.join(self.core.BACKUP_DIR, "hosts.save.planted"), "x")
+        with open(victim, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "untouched\n")
+
+    def test_symlinked_snapshot_is_never_listed_or_restored(self):
+        secret = os.path.join(self.tmp, "secret")
+        with open(secret, "w", encoding="utf-8") as handle:
+            handle.write("10.10.11.9 leaked.htb\n")
+        os.makedirs(self.core.BACKUP_DIR, mode=0o700)
+        os.symlink(secret, os.path.join(self.core.BACKUP_DIR, "hosts.save.link"))
+        self.assertEqual(self.core.list_backups(), [])
+        with self.assertRaises(self.core.HostsError):
+            self.core.restore("link")
+        self.assertNotIn("leaked.htb", self.read())
+
+    def _plant(self, name, content, mode=0o600):
+        os.makedirs(self.core.BACKUP_DIR, mode=0o700, exist_ok=True)
+        path = os.path.join(self.core.BACKUP_DIR, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        os.chmod(path, mode)
+
+    def test_world_writable_snapshot_is_refused(self):
+        self._plant("hosts.save.loose", INFRA)
+        os.chmod(os.path.join(self.core.BACKUP_DIR, "hosts.save.loose"), 0o666)
+        with self.assertRaises(self.core.HostsError):
+            self.core.restore("loose")
+
+    def test_snapshot_with_invalid_managed_entry_is_refused(self):
+        self._plant(
+            "hosts.save.bad",
+            INFRA + "# >>> htb-hosts >>>\n10.10.11.5\t$(id).htb  # tag=box\n# <<< htb-hosts <<<\n",
+        )
+        before = self.read()
+        with self.assertRaises(self.core.HostsError):
+            self.core.restore("bad")
+        self.assertEqual(self.read(), before)
+
+    def test_snapshot_with_malformed_block_is_refused(self):
+        self._plant("hosts.save.broken", INFRA + "# >>> htb-hosts >>>\n10.10.11.5\tbox.htb\n")
+        with self.assertRaises(self.core.HostsError):
+            self.core.restore("broken")
 
 
 class TestParseTokens(HostsTestCase):
