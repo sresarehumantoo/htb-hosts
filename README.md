@@ -362,8 +362,12 @@ restore it (`doctor` also flags a mangled managed block, e.g. an orphaned marker
 make test     # stdlib unittest suite (no root, /etc/hosts untouched)
 make smoke    # quick end-to-end CLI check against a throwaway file
 make lint     # black --check + pylint (gated at 10.00/10)
+make audit    # uv audit of the locked dev deps + zizmor over .github/
 make help     # list all targets
 ```
+
+The dev toolchain (black, pylint, zizmor) is pinned in `uv.lock` and run through
+`uv run --locked`; `make lint UV_RUN=` uses whatever is already on your `PATH`.
 
 Tests load the modules directly from `src/`, so they exercise the in-repo copy
 regardless of what's installed under `/opt`, and each test runs against a throwaway
@@ -383,7 +387,8 @@ src/htb-hosts       CLI entrypoint                              → /usr/local/b
 completions/        zsh + bash tab completion scripts           → share/{zsh,bash-completion}
 tests/              unittest suite (core, CLI, MCP)
 Makefile            install / remove / lint / test targets
-pyproject.toml      black + pylint config (line length 100)
+pyproject.toml      dev dependency group + black/pylint config (line length 100)
+uv.lock             locked dev toolchain
 ```
 
 ## License

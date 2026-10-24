@@ -28,7 +28,7 @@ MCP_CMD := python3 $(LIBDIR)/mcp_server.py
 .DEFAULT_GOAL := help
 
 .PHONY: help install install-files install-acl mcp completions remove purge \
-        migrate lint lint-completions format test smoke reinstall clean
+        migrate lint lint-completions audit format test smoke reinstall clean
 
 help: ## Show this help
 	@echo "htb-hosts targets:"
@@ -97,15 +97,18 @@ purge: ## Full removal: managed block + ACL + software
 
 reinstall: remove install ## Remove then install fresh
 
+# Dev tools run from uv.lock; pass UV_RUN= to use whatever black/pylint is on PATH.
+UV_RUN ?= uv run --locked
+
 # Conventions that are expected/noisy in a unittest suite but not in library code.
 TEST_LINT_SKIP := missing-docstring,too-few-public-methods,duplicate-code,protected-access
 
 lint: ## Run black --check and pylint on src (strict 10.0) and tests (relaxed)
-	black --check src/htb_hosts.py src/mcp_server.py src/htb-hosts tests/*.py
+	$(UV_RUN) black --check src/htb_hosts.py src/mcp_server.py src/htb-hosts tests/*.py
 	@tmpdir=$$(mktemp -d) && cp src/htb-hosts $$tmpdir/_htb_hosts_cli.py && \
-		pylint src/htb_hosts.py src/mcp_server.py $$tmpdir/_htb_hosts_cli.py; \
+		$(UV_RUN) pylint src/htb_hosts.py src/mcp_server.py $$tmpdir/_htb_hosts_cli.py; \
 		rc=$$?; rm -rf $$tmpdir; [ $$rc -eq 0 ] || exit $$rc
-	pylint --disable=$(TEST_LINT_SKIP) tests/*.py
+	$(UV_RUN) pylint --disable=$(TEST_LINT_SKIP) tests/*.py
 
 lint-completions: ## Syntax-check the shell completion scripts
 	bash -n completions/htb-hosts.bash
@@ -115,8 +118,12 @@ lint-completions: ## Syntax-check the shell completion scripts
 		echo "-- zsh not installed; checked bash only"; \
 	fi
 
+audit: ## Scan the locked dev deps for known vulns and .github/ with zizmor
+	uv audit --locked --preview-features audit-command
+	$(UV_RUN) zizmor .github/
+
 format: ## Auto-format the sources and tests with black
-	black src/htb_hosts.py src/mcp_server.py src/htb-hosts tests/*.py
+	$(UV_RUN) black src/htb_hosts.py src/mcp_server.py src/htb-hosts tests/*.py
 
 clean: ## Remove Python bytecode caches
 	find . -name __pycache__ -type d -prune -exec rm -rf {} + ; rm -rf .pylint.d

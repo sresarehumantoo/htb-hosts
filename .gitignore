@@ -7,3 +7,4 @@ CLAUDE.md
 
 # Local Claude Code settings (per-machine permissions)
 .claude/
+.venv/
