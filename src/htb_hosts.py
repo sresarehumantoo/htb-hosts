@@ -643,6 +643,7 @@ def select(patterns: Any = None, field: str = "ip", index: Any = None) -> Dict:
 
 
 COMPLETE_KINDS = ("hosts", "ips", "tags", "selectors", "targets", "backups")
+_SAFE_WORD_RE = re.compile(r"^[A-Za-z0-9_.:%-]+$")
 
 
 def complete(kind: str, patterns: Any = None) -> list[str]:
@@ -661,7 +662,7 @@ def complete(kind: str, patterns: Any = None) -> list[str]:
     meaningful order, the rest are sorted so the completion menu is stable.
     """
     if kind == "backups":
-        return [b["name"] for b in reversed(list_backups())]
+        return [b["name"] for b in reversed(list_backups()) if _SAFE_WORD_RE.match(b["name"])]
     if kind not in COMPLETE_KINDS:
         raise HostsError(f"unknown completion kind: {kind!r} (use {', '.join(COMPLETE_KINDS)})")
     pats = [p.lower() for p in parse_tokens(patterns)]
@@ -676,7 +677,9 @@ def complete(kind: str, patterns: Any = None) -> list[str]:
             words.add(entry.ip)
         if kind in ("tags", "targets") and entry.tag:
             words.add(entry.tag)
-    return sorted(w for w in words if w.lower() not in pats)
+    # The words are spliced into an interactive command line, and the block may
+    # have been hand-edited, so offer nothing a validated entry could not hold.
+    return sorted(w for w in words if w.lower() not in pats and _SAFE_WORD_RE.match(w))
 
 
 def _is_infra(line: str) -> bool:

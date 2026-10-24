@@ -10,8 +10,11 @@ _htb-hosts_words() {
   # $1 = completion kind, $2 = tag/description, $3... = patterns already typed
   local kind=$1 descr=$2
   shift 2
-  local -a items
-  items=(${(f)"$(_call_program htb-hosts htb-hosts complete $kind "$@" 2>/dev/null)"})
+  # _call_program evals its arguments, so requote the typed words as literals;
+  # otherwise a $(...) still sitting on the command line would run on <TAB>.
+  local -a items scope
+  scope=("${(@Q)@}")
+  items=(${(f)"$(_call_program htb-hosts htb-hosts complete $kind ${(q)scope} 2>/dev/null)"})
   (( ${#items} )) && _describe -t "$kind" "$descr" items
 }
 

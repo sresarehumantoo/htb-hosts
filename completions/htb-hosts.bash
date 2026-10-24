@@ -8,11 +8,15 @@
 
 # Fill COMPREPLY from `htb-hosts complete <kind> [scope...]`, filtered by $cur.
 # $2 is extra literal words to offer alongside; $3.. scope the candidates.
+# Filtered by hand rather than with `compgen -W`, which runs expansions (even
+# command substitution) on its word list, and these words come from /etc/hosts.
 _htb_hosts_words() {
-    local kind=$1 extra=$2 words
+    local kind=$1 extra=$2 word
     shift 2
-    words=$(htb-hosts complete "$kind" "$@" 2>/dev/null) || return 0
-    mapfile -t COMPREPLY < <(compgen -W "$words $extra" -- "$cur")
+    COMPREPLY=()
+    while IFS= read -r word; do
+        [[ -n $word && $word == "$cur"* ]] && COMPREPLY+=("$word")
+    done < <(htb-hosts complete "$kind" "$@" 2>/dev/null; printf '%s\n' $extra)
 }
 
 # Complete a `get`/`show` pattern: scoped to the patterns already typed (a second

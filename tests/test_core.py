@@ -599,6 +599,15 @@ class TestComplete(HostsTestCase):
     def test_scoping_narrows_with_each_pattern(self):
         self.assertEqual(self.core.complete("hosts", ["example", "jobs"]), ["jobs.example.local"])
 
+    def test_hand_edited_shell_syntax_is_never_offered(self):
+        with open(self.hosts, "w", encoding="utf-8") as handle:
+            handle.write(
+                "# >>> htb-hosts >>>\n"
+                "10.10.11.7\tbox.htb $(id).htb  # tag=`id`\n"
+                "# <<< htb-hosts <<<\n"
+            )
+        self.assertEqual(self.core.complete("targets"), ["10.10.11.7", "box.htb"])
+
     def test_an_already_typed_pattern_is_not_offered_again(self):
         self.assertNotIn("forest", self.core.complete("targets", ["forest"]))
 
