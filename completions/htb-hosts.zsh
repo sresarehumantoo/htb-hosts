@@ -15,6 +15,8 @@ _htb-hosts_words() {
   local -a items scope
   scope=("${(@Q)@}")
   items=(${(f)"$(_call_program htb-hosts htb-hosts complete $kind ${(q)scope} 2>/dev/null)"})
+  # _describe splits word:description on the first colon, which cuts IPv6 short.
+  items=(${items//:/\\:})
   (( ${#items} )) && _describe -t "$kind" "$descr" items
 }
 
