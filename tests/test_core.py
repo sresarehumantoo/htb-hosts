@@ -19,6 +19,17 @@ class TestValidation(HostsTestCase):
             with self.assertRaises(self.core.HostsError):
                 self.core.validate_ip(bad)
 
+    def test_validate_ip_scope_id(self):
+        self.assertEqual(self.core.validate_ip("fe80::1%eth0"), "fe80::1%eth0")
+        for bad in ("fe80::1%a\nb", "fe80::1%x#y", "fe80::1%a b", "fe80::1%\t1.2.3.4 evil.htb"):
+            with self.assertRaises(self.core.HostsError):
+                self.core.validate_ip(bad)
+
+    def test_add_rejects_scope_id_line_injection(self):
+        with self.assertRaises(self.core.HostsError):
+            self.core.add("fe80::1%x\n10.10.11.5 evil.htb", ["box.htb"])
+        self.assertEqual(self.core.list_entries(), [])
+
     def test_validate_hostname_ok(self):
         for good in ("machine.htb", "a.b.c.htb", "host_1.vl", "x"):
             self.assertEqual(self.core.validate_hostname(good), good)

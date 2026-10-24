@@ -68,9 +68,15 @@ class HostsError(Exception):
 def validate_ip(ip: str) -> str:
     """Return the normalized IP string, or raise HostsError."""
     try:
-        return str(ipaddress.ip_address(ip.strip()))
+        addr = ipaddress.ip_address(ip.strip())
     except ValueError as exc:
         raise HostsError(f"invalid IP address: {ip!r}") from exc
+    # ipaddress accepts any characters in an IPv6 scope id (fe80::1%<anything>),
+    # newlines and '#' included, and str() echoes them back into the file.
+    scope = getattr(addr, "scope_id", None)
+    if scope is not None and not re.match(r"^[A-Za-z0-9_.-]+$", scope):
+        raise HostsError(f"invalid IP address: {ip!r}")
+    return str(addr)
 
 
 def validate_hostname(name: str) -> str:
