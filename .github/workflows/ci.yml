@@ -17,8 +17,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      # Actions pinned to commit SHAs (tags are movable) — same spirit as the
-      # locked linter versions below.
+      # Actions pinned to commit SHAs (tags are movable), in the same
+      # spirit as the locked linter versions below.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

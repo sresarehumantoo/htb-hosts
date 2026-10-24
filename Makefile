@@ -39,7 +39,7 @@ help: ## Show this help
 
 install: install-files install-acl completions mcp ## Install everything (files + ACL + completions + MCP)
 	@if [ "$(HOSTS_USER)" = root ]; then \
-		echo "!! HOSTS_USER=root — no unprivileged user got the ACL, so no-sudo use"; \
+		echo "!! HOSTS_USER=root: no unprivileged user got the ACL, so no-sudo use"; \
 		echo "   won't work. Run 'make install' as your normal user, or pass"; \
 		echo "   HOSTS_USER=<name>."; \
 	fi

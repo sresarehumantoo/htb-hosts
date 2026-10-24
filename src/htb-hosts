@@ -139,7 +139,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
             print(f"    {entry['ip']:<15} {' '.join(entry['hostnames'])}")
     if args.full:
         unmanaged = data["unmanaged"]
-        print(f"\n  unmanaged / system ({len(unmanaged)}) — outside the managed block")
+        print(f"\n  unmanaged / system ({len(unmanaged)}), outside the managed block")
         for entry in unmanaged:
             print(f"    {entry['ip']:<15} {' '.join(entry['hostnames'])}")
     return 0

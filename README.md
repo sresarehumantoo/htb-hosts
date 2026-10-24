@@ -7,7 +7,7 @@
 **Sudo-free, cleanable `/etc/hosts` management for Hack The Box (and any lab work).**
 
 Doing HTB, pentests, or CTFs means constantly adding `IP → hostname` lines to
-`/etc/hosts` — then hunting them down to clean up later. `htb-hosts` keeps every
+`/etc/hosts`, then hunting them down to clean up later. `htb-hosts` keeps every
 entry it manages inside one delimited block, grants you passwordless write access
 via a POSIX ACL, and gives you one command to wipe a box (or everything). It ships
 as both a **CLI** and a zero-dependency **MCP server**, so you *and* your AI coding
@@ -39,30 +39,30 @@ cleaned 3 entry/entries (all except ~forest)
 
 ## Features
 
-- 🔓 **No sudo for daily use** — a one-time ACL grant lets you edit `/etc/hosts`
+- **No sudo for daily use**: a one-time ACL grant lets you edit `/etc/hosts`
   without `sudo` ever again.
-- 🧹 **One-shot cleanup** — everything lives in a managed block. `clean` wipes it;
+- **One-shot cleanup**: everything lives in a managed block. `clean` wipes it;
   `clean --tag forest` drops one box; `clean --exclude forest` keeps one and clears
   the rest.
-- 🔎 **Pipe-friendly lookups** — `htb-hosts get forest` prints just the IP, so
+- **Pipe-friendly lookups**: `htb-hosts get forest` prints just the IP, so
   `nmap $(htb-hosts get forest)` and `ffuf -u http://$(htb-hosts get forest --host)`
   just work.
-- 🏷️ **Automatic per-box tagging** — hostnames are grouped by box name
+- **Automatic per-box tagging**: hostnames are grouped by box name
   (`dc01.forest.htb` → `forest`), even across multiple IPs.
-- 🧰 **Safe by construction** — strict input validation (no injection), `flock`
+- **Safe by construction**: strict input validation (no injection), `flock`
   locking for writers *and* readers, in-place writes that preserve the ACL, and
   automatic backups on every change (loud warning if a snapshot ever fails).
-- ⏪ **Backup & restore** — named snapshots (private: `0700`/`0600`) and
+- **Backup & restore**: named snapshots (private: `0700`/`0600`) and
   one-command rollback.
-- ⌨️ **Tab completion** — zsh and bash completions for commands, flags, and your
+- **Tab completion**: zsh and bash completions for commands, flags, and your
   live hostnames, IPs, tags, and snapshots.
-- 🤖 **MCP server included** — first-class tools for Claude Code / MCP agents.
-- 🪶 **Zero runtime dependencies** — pure Python standard library.
+- **MCP server included**: first-class tools for Claude Code / MCP agents.
+- **Zero runtime dependencies**: pure Python standard library.
 
 ## Install
 
 Requirements: Linux, Python 3.11+, and a filesystem with POSIX ACL support
-(ext4/xfs/btrfs — the default almost everywhere) plus `setfacl`.
+(ext4/xfs/btrfs, the default almost everywhere) plus `setfacl`.
 
 ```bash
 git clone https://github.com/sresarehumantoo/htb-hosts.git
@@ -73,7 +73,7 @@ make install
 `make install` copies the tool into `/opt/htb-hosts` and `/usr/local/bin`, grants
 your user an ACL on `/etc/hosts`, installs the shell completions, and registers the
 MCP server. It works whether
-you run it directly or under `sudo` — the steps that need privilege call `sudo`
+you run it directly or under `sudo`: the steps that need privilege call `sudo`
 themselves, and the human user is auto-detected (`SUDO_USER` when under sudo, else
 the current user) so the ACL always targets **you**, not root. Override with
 `HOSTS_USER=<name>` if needed.
@@ -115,7 +115,7 @@ htb-hosts clean                                         # wipe all managed entri
 htb-hosts doctor                                        # check access / show the fix
 ```
 
-The IP can go anywhere in the arguments — `htb-hosts add forest.htb 10.10.11.161`
+The IP can go anywhere in the arguments: `htb-hosts add forest.htb 10.10.11.161`
 works too, and any single argument may carry several names separated by commas or
 spaces. Add `--json` to most commands for machine-readable output.
 
@@ -141,8 +141,8 @@ spaces. Add `--json` to most commands for machine-readable output.
 
 ### Selecting values for other tools
 
-`get` prints nothing but the values of the entries matching a fuzzy pattern —
-one per line, deduplicated — so they drop straight into another command:
+`get` prints nothing but the values of the entries matching a fuzzy pattern,
+one per line, deduplicated, so they drop straight into another command:
 
 ```bash
 nmap -p- $(htb-hosts get forest)                   # -> 10.10.11.161
@@ -178,7 +178,7 @@ typo can't silently hand an empty target list to the next command.
 #### Picking one of several values
 
 A box with a few vhosts has a few hostnames on one IP, and pasting all of them
-into `$(...)` word-splits into several arguments — `curl http://a.htb b.htb c.htb/`.
+into `$(...)` word-splits into several arguments: `curl http://a.htb b.htb c.htb/`.
 `-n`/`--numbered` shows you what's there, and `-i`/`--index` keeps just the lines
 you want (1-based):
 
@@ -208,7 +208,7 @@ nmap $(htb-hosts get forest --sep ,)      # -> nmap 10.10.11.161,10.10.11.162
 ### Tab completion
 
 `make install` drops a zsh completion in `$PREFIX/share/zsh/site-functions` and a
-bash one in `$PREFIX/share/bash-completion/completions` — both on the default
+bash one in `$PREFIX/share/bash-completion/completions`, both on the default
 search paths, so no rc-file edit is needed. `make completions` installs just those.
 
 Completion is **live**: candidates come from the managed block as it stands right
@@ -227,10 +227,10 @@ now, not a static list.
 Completion is also **scoped and field-aware**: once you have typed a pattern, the
 next one completes only from what that selection contains, and `--host` restricts
 the menu to the hostnames that field can actually print. Accepting a suggestion
-therefore always does what the menu implied — which is why patterns narrow.
+therefore always does what the menu implied, which is why patterns narrow.
 
 The scripts get their data from `htb-hosts complete <kind> [pattern…]`, a hidden
-subcommand that prints one candidate per line. It is deliberately silent on failure — an
+subcommand that prints one candidate per line. It is deliberately silent on failure: an
 unreadable or malformed `/etc/hosts` degrades completion rather than spraying
 errors into your prompt.
 
@@ -238,7 +238,7 @@ errors into your prompt.
 
 Every entry carries a `tag`, defaulting to the **box name** derived from its first
 hostname (`dc01.forest.htb` → `forest`; `fileserver.corp.local` → `corp`). That
-groups a whole box — even across several IPs — under one tag, so `clean --tag
+groups a whole box (even across several IPs) under one tag, so `clean --tag
 forest` clears it in one go. Re-derive tags for existing entries any time:
 
 ```bash
@@ -329,7 +329,7 @@ setfacl -m u:youruser:rw /etc/hosts
 ```
 
 Because a non-owner can't re-apply an ACL, the tool edits `/etc/hosts` **in place**
-(open `r+`, rewrite, truncate) under an `flock` — it never renames a temp file over
+(open `r+`, rewrite, truncate) under an `flock`; it never renames a temp file over
 it, which would drop the ACL and flip ownership. All input is strictly validated so
 nothing can inject extra lines, and the prior contents are snapshotted before every
 change. If the ACL is ever lost, `htb-hosts doctor` prints the exact command to
@@ -339,7 +339,7 @@ restore it (`doctor` also flags a mangled managed block, e.g. an orphaned marker
 
 - **The ACL is broader than the tool.** `setfacl -m u:you:rw /etc/hosts` lets
   *any* process running as your user rewrite the whole file and redirect name
-  resolution system-wide — the managed block is a convention the tool honors,
+  resolution system-wide; the managed block is a convention the tool honors,
   not something the kernel enforces. That's the deliberate trade-off for
   sudo-free use; make it on a personal lab machine, not a shared or production
   one. `make purge` removes the ACL again.
@@ -371,7 +371,7 @@ The dev toolchain (black, pylint, zizmor) is pinned in `uv.lock` and run through
 
 Tests load the modules directly from `src/`, so they exercise the in-repo copy
 regardless of what's installed under `/opt`, and each test runs against a throwaway
-temp file — your real `/etc/hosts` is never touched. Coverage includes input
+temp file, so your real `/etc/hosts` is never touched. Coverage includes input
 validation/injection rejection, add/merge/rehome/idempotency, clean/exclude,
 migration + tagging, backup/restore (including snapshot permissions, symlink and tamper refusal, and the
 warn-but-don't-block behavior on backup failure), `doctor`'s marker-integrity

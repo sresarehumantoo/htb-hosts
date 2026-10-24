@@ -7,7 +7,7 @@ delimited "managed block"; lines outside the markers are never touched.
 Key constraint: on the real /etc/hosts, unprivileged access is granted to owen
 via a POSIX ACL (`setfacl -m u:owen:rw /etc/hosts`). owen is NOT the file owner
 and therefore cannot re-apply an ACL, so we must edit the file IN PLACE
-(open r+, rewrite, truncate) and never write-temp-then-rename -- a rename would
+(open r+, rewrite, truncate) and never write-temp-then-rename: a rename would
 drop the ACL and flip ownership back to whoever ran the tool.
 """
 
@@ -50,7 +50,7 @@ _TOKEN_SEP_RE = re.compile(r"[,;\s]+")
 _INFRA_TOKENS = ("localhost", "ip6-", "ff02::", "ff00::")
 
 # Extra substrings (case-insensitive) to also keep outside the managed block on
-# migrate — e.g. a homelab/corp domain you manage by hand. Comma-separated.
+# migrate, e.g. a homelab/corp domain you manage by hand. Comma-separated.
 #   HTB_HOSTS_KEEP="corp.lan,homelab.internal"
 _KEEP_EXTRA = [
     s.strip().lower() for s in os.environ.get("HTB_HOSTS_KEEP", "").split(",") if s.strip()
@@ -450,7 +450,7 @@ def clean(
 
     - no args: wipe the whole managed block
     - `tag`: remove only entries with that exact tag
-    - `match`: remove entries fuzzily matching *every* pattern — the same
+    - `match`: remove entries fuzzily matching *every* pattern, using the same
       selector language as `select`, so `clean --match example web` removes
       exactly what `get example web` shows
     - `exclude`: remove everything EXCEPT entries fuzzily matching *any* pattern
@@ -502,7 +502,7 @@ def list_entries(tag: Optional[str] = None) -> list[Dict]:
 
 def outside_entries() -> list[Dict]:
     """Return host entries that live OUTSIDE the managed block (localhost, IPv6,
-    anything hand-added) — i.e. everything the tool does not manage."""
+    anything hand-added), i.e. everything the tool does not manage."""
     pre, _, post = _split(_read())
     out: list[Dict] = []
     for line in pre + post:
@@ -555,7 +555,7 @@ def _selected_hostnames(entry: Entry, patterns: list[str]) -> list[str]:
 
     Narrow to the hostnames matching every pattern (so `select example jobs`
     yields only jobs.example.htb), but fall back to all of them when none match
-    — the entry got here on its IP or tag, and those names are the answer.
+    (the entry got here on its IP or tag, and those names are the answer).
     """
     if not patterns:
         return list(entry.hostnames)
@@ -612,7 +612,7 @@ def select(patterns: Any = None, field: str = "ip", index: Any = None) -> Dict:
     first-seen order, so `nmap $(htb-hosts get example)` gets a clean target
     list.
 
-    `index` narrows "values" to the given 1-based line(s) — the answer to a box
+    `index` narrows "values" to the given 1-based line(s). That is the answer to a box
     whose several hostnames would otherwise word-split into several arguments
     (see `resolve_index` for the accepted forms). No match is not an error here:
     "values" is just empty, and `index` is not applied to an empty list.
@@ -650,12 +650,12 @@ def complete(kind: str, patterns: Any = None) -> list[str]:
     """Return candidate words for shell tab completion.
 
     "hosts"/"ips"/"tags" are the managed hostnames, IPs and tags. "selectors" is
-    hostnames + IPs — what `add` and `rm` name an entry by. "targets" adds tags
+    hostnames + IPs, what `add` and `rm` name an entry by. "targets" adds tags
     on top, which is what a fuzzy pattern (`get`, `clean --exclude`) may match.
     "backups" is the snapshot names, newest first.
 
     `patterns` scopes the result to the entries those patterns already select,
-    using exactly `select`'s narrowing rule — so completing the next word of
+    using exactly `select`'s narrowing rule, so completing the next word of
     `get example --host` offers the hostnames inside the example box, and
     accepting one does what the menu implied. Patterns already typed are dropped
     from the candidates. Everything is deduplicated; only "backups" keeps a

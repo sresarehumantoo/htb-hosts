@@ -2,7 +2,7 @@ __pycache__/
 *.pyc
 .pylint.d/
 
-# Local agent working notes — not committed
+# Local agent working notes, not committed
 CLAUDE.md
 
 # Local Claude Code settings (per-machine permissions)

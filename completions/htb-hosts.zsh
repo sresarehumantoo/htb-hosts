@@ -3,7 +3,7 @@
 # `_htb-hosts` (make install puts it in $PREFIX/share/zsh/site-functions).
 #
 # Candidate words come from `htb-hosts complete <kind>`, which prints one word
-# per line and stays silent if /etc/hosts is unreadable -- so a broken hosts
+# per line and stays silent if /etc/hosts is unreadable, so a broken hosts
 # file degrades completion instead of spraying errors into the prompt.
 
 _htb-hosts_words() {
