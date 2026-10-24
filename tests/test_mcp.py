@@ -54,6 +54,17 @@ class TestProtocol(McpTestCase):
         reply = self.mcp.handle({"jsonrpc": "2.0", "id": 3, "method": "bogus"})
         self.assertEqual(reply["error"]["code"], -32601)
 
+    def test_non_object_message_is_an_error_not_a_crash(self):
+        for msg in ([1], "x", 7, None):
+            self.assertEqual(self.mcp.handle(msg)["error"]["code"], -32600)
+
+    def test_non_object_params_are_an_error_not_a_crash(self):
+        for params in ("x", [1], {"name": "htb_hosts_retag", "arguments": "x"}):
+            reply = self.mcp.handle(
+                {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": params}
+            )
+            self.assertEqual(reply["error"]["code"], -32602)
+
 
 class TestTools(McpTestCase):
     def test_add_updates_file(self):

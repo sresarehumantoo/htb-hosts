@@ -208,9 +208,11 @@ def _error(id_: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": id_, "error": {"code": code, "message": message}}
 
 
-def handle(msg: dict[str, Any]) -> Optional[dict[str, Any]]:
+def handle(msg: Any) -> Optional[dict[str, Any]]:
     """Handle a single JSON-RPC message; return a reply, or None for notifications."""
     # pylint: disable=too-many-return-statements
+    if not isinstance(msg, dict):
+        return _error(None, -32600, "invalid request: expected a JSON object")
     method = msg.get("method")
     id_ = msg.get("id")
     is_notification = "id" not in msg
@@ -227,9 +229,11 @@ def handle(msg: dict[str, Any]) -> Optional[dict[str, Any]]:
     if method == "tools/list":
         return _result(id_, {"tools": TOOLS})
     if method == "tools/call":
-        params = msg.get("params", {})
+        params = msg.get("params") or {}
+        if not isinstance(params, dict) or not isinstance(params.get("arguments") or {}, dict):
+            return _error(id_, -32602, "invalid params: expected an object of arguments")
         name = params.get("name")
-        args = params.get("arguments", {}) or {}
+        args = params.get("arguments") or {}
         try:
             data = _call_tool(name, args)
             return _result(id_, {"content": [{"type": "text", "text": json.dumps(data, indent=2)}]})
